@@ -106,6 +106,18 @@ def _fee_for(amount: float, rng: random.Random) -> float:
     return round(max(0.00001, amount * rng.uniform(0.0002, 0.003)), 8)
 
 
+def _make_ip_pool(size: int, faker: Faker) -> list[str]:
+    """A fixed set of source IPs that transactions are broadcast from.
+
+    Drawing a fresh random IP per transaction would leave every IP node in the
+    graph at degree 1, which makes the whole network layer useless: the reason
+    IPs are in the graph at all is so an analyst can pivot from a wallet to the
+    host that broadcast it and on to the *other* wallets sharing that host.
+    Reuse is what creates that link.
+    """
+    return [faker.ipv4_public() for _ in range(size)]
+
+
 def _timestamp_in_window(rng: random.Random) -> datetime:
     """A random moment in the last WINDOW_DAYS, biased toward business hours."""
     offset = rng.uniform(0, WINDOW_DAYS * 24 * 3600)
@@ -124,6 +136,8 @@ def _build_transaction(
     rng: random.Random,
     faker: Faker,
     high_risk_geo: bool = False,
+    src_ip: str | None = None,
+    ip_pool: list[str] | None = None,
 ) -> Transaction:
     """Assemble a Transaction, deriving the fee from the input/output gap.
 
@@ -131,6 +145,10 @@ def _build_transaction(
     downstream features (amount variance, fan-in/fan-out value ratios) only
     make sense if that identity holds, so callers must leave room for the fee
     in their outputs.
+
+    `src_ip` pins the broadcasting host, which injected patterns use to model
+    one actor operating from one machine. Otherwise IPs are drawn from
+    `ip_pool` so hosts recur across the dataset.
     """
     total_in = sum(a for _, a in inputs)
     total_out = sum(a for _, a in outputs)
@@ -141,12 +159,13 @@ def _build_transaction(
         )
 
     geo_country, asn = rng.choice(HIGH_RISK_GEO if high_risk_geo else GEO_POOL)
+    pool = ip_pool or [faker.ipv4_public() for _ in range(2)]
 
     return Transaction(
         txid=_txid(rng),
         timestamp=timestamp,
-        src_ip=faker.ipv4_public(),
-        dst_ip=faker.ipv4_public(),
+        src_ip=src_ip or rng.choice(pool),
+        dst_ip=rng.choice(pool),
         src_port=rng.randint(32768, 60999),
         dst_port=rng.choice(BITCOIN_P2P_PORTS),
         input_addresses=[a for a, _ in inputs],
@@ -170,6 +189,7 @@ def generate_normal_transactions(
     rng: random.Random | None = None,
     faker: Faker | None = None,
     wallet_pool_size: int | None = None,
+    ip_pool: list[str] | None = None,
 ) -> list[Transaction]:
     """Generate `n` clean transactions spread over the last 30 days.
 
@@ -184,6 +204,9 @@ def generate_normal_transactions(
 
     pool_size = wallet_pool_size or max(50, n // 4)
     pool = [_wallet_address(rng) for _ in range(pool_size)]
+    # Roughly one host per dozen transactions, so IPs recur and the network
+    # layer of the graph carries structure worth pivoting through.
+    ip_pool = ip_pool or _make_ip_pool(max(20, n // 12), faker)
     # Weight index 0 highest so a few wallets act as hubs (exchanges, mixers).
     weights = [1.0 / (i + 1) ** 0.75 for i in range(pool_size)]
 
@@ -216,7 +239,14 @@ def generate_normal_transactions(
             continue  # degenerate split; skip rather than emit a zero output
 
         transactions.append(
-            _build_transaction(inputs, outputs, _timestamp_in_window(rng), rng, faker)
+            _build_transaction(
+                inputs,
+                outputs,
+                _timestamp_in_window(rng),
+                rng,
+                faker,
+                ip_pool=ip_pool,
+            )
         )
 
     return transactions
@@ -234,6 +264,8 @@ def inject_peel_chain(
     start_time: datetime,
     rng: random.Random | None = None,
     faker: Faker | None = None,
+    actor_ip: str | None = None,
+    ip_pool: list[str] | None = None,
 ) -> list[Transaction]:
     """Simulate a peel chain.
 
@@ -273,6 +305,8 @@ def inject_peel_chain(
                 rng=rng,
                 faker=faker,
                 high_risk_geo=True,
+                src_ip=actor_ip,
+                ip_pool=ip_pool,
             )
         )
 
@@ -289,6 +323,8 @@ def inject_rapid_fanout(
     start_time: datetime,
     rng: random.Random | None = None,
     faker: Faker | None = None,
+    actor_ip: str | None = None,
+    ip_pool: list[str] | None = None,
 ) -> list[Transaction]:
     """Simulate structuring / smurfing.
 
@@ -318,6 +354,8 @@ def inject_rapid_fanout(
                 rng=rng,
                 faker=faker,
                 high_risk_geo=True,
+                src_ip=actor_ip,
+                ip_pool=ip_pool,
             )
         )
         ts += timedelta(seconds=rng.uniform(20, 150))
@@ -331,6 +369,8 @@ def inject_round_trip(
     start_time: datetime,
     rng: random.Random | None = None,
     faker: Faker | None = None,
+    actor_ip: str | None = None,
+    ip_pool: list[str] | None = None,
 ) -> list[Transaction]:
     """Simulate a mixing / wash loop.
 
@@ -369,6 +409,8 @@ def inject_round_trip(
                 rng=rng,
                 faker=faker,
                 high_risk_geo=True,
+                src_ip=actor_ip,
+                ip_pool=ip_pool,
             )
         )
         current_amount = forward
@@ -397,10 +439,19 @@ def build_dataset(
     faker = Faker()
     Faker.seed(seed)
 
-    transactions = generate_normal_transactions(n_normal, rng=rng, faker=faker)
+    ip_pool = _make_ip_pool(max(20, n_normal // 12), faker)
+    transactions = generate_normal_transactions(
+        n_normal, rng=rng, faker=faker, ip_pool=ip_pool
+    )
     clean_wallets = sorted(
         {a for t in transactions for a in t.input_addresses + t.output_addresses}
     )
+
+    # Each injected pattern broadcasts from a single host it does not share
+    # with anyone else. That is what makes "these thirty wallets all came from
+    # one IP" a finding rather than a coincidence, and it gives the graph an
+    # IP node worth pivoting through during the demo.
+    actor_ips = _make_ip_pool(n_peel_chains + n_fanouts + n_round_trips, faker)
 
     patterns: list[dict] = []
 
@@ -416,7 +467,8 @@ def build_dataset(
                 "transaction_count": len(txs),
                 "start_time": min(t.timestamp for t in txs).isoformat(),
                 "end_time": max(t.timestamp for t in txs).isoformat(),
-                "details": details,
+                "actor_ips": sorted({t.src_ip for t in txs}),
+            "details": details,
             }
         )
         transactions.extend(txs)
@@ -430,7 +482,14 @@ def build_dataset(
         hops = rng.randint(6, 10)
         amount = round(rng.uniform(8.0, 40.0), 8)
         txs = inject_peel_chain(
-            origin, hops, amount, _timestamp_in_window(rng), rng=rng, faker=faker
+            origin,
+            hops,
+            amount,
+            _timestamp_in_window(rng),
+            rng=rng,
+            faker=faker,
+            actor_ip=actor_ips.pop(),
+            ip_pool=ip_pool,
         )
         _record(
             "peel_chain", txs, origin_wallet=origin, hops=len(txs), start_amount=amount
@@ -440,7 +499,13 @@ def build_dataset(
         source = rng.choice(clean_wallets)
         num_targets = rng.randint(12, 25)
         txs = inject_rapid_fanout(
-            source, num_targets, _timestamp_in_window(rng), rng=rng, faker=faker
+            source,
+            num_targets,
+            _timestamp_in_window(rng),
+            rng=rng,
+            faker=faker,
+            actor_ip=actor_ips.pop(),
+            ip_pool=ip_pool,
         )
         total_btc = round(sum(sum(t.output_amounts) for t in txs), 8)
         _record(
@@ -459,7 +524,13 @@ def build_dataset(
         ]
         amount = round(rng.uniform(2.0, 15.0), 8)
         txs = inject_round_trip(
-            ring, amount, _timestamp_in_window(rng), rng=rng, faker=faker
+            ring,
+            amount,
+            _timestamp_in_window(rng),
+            rng=rng,
+            faker=faker,
+            actor_ip=actor_ips.pop(),
+            ip_pool=ip_pool,
         )
         _record("round_trip", txs, ring=ring, start_amount=amount)
 
