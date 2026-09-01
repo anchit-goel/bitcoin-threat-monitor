@@ -9,3 +9,4 @@ pydantic
 faker
 python-multipart
 joblib
+pytest
