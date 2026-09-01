@@ -1,0 +1,75 @@
+"""
+Core Pydantic schemas for the Bitcoin Transaction Threat Monitor.
+
+THIS FILE IS THE CONTRACT.
+
+Every module in this project — the synthetic data generator, the ingestion
+parser, the graph builder, the scoring pipeline, the FastAPI layer, and the
+React frontend — is built against the shapes defined here. If you need a new
+field, change it here first and tell the team, rather than inventing a
+divergent shape in your own module.
+"""
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class Severity(str, Enum):
+    """Severity buckets for a scored wallet.
+
+    Subclasses `str` so it serializes as a plain string in JSON and satisfies
+    the `severity: str` field in WalletAlert.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class Transaction(BaseModel):
+    """A single Bitcoin transaction, enriched with network metadata.
+
+    One transaction may have many inputs and many outputs. `input_amounts`
+    is positionally aligned with `input_addresses`, and likewise for outputs.
+    """
+
+    txid: str = Field(..., description="Transaction hash / identifier")
+    timestamp: datetime = Field(..., description="When the transaction was observed")
+
+    # Network-layer metadata (from traffic capture, not the blockchain itself)
+    src_ip: str = Field(..., description="Source IP that broadcast the transaction")
+    dst_ip: str = Field(..., description="Destination / peer IP")
+    src_port: int = Field(..., description="Source TCP port")
+    dst_port: int = Field(..., description="Destination TCP port")
+
+    # Chain-layer metadata
+    input_addresses: list[str] = Field(..., description="Wallet addresses funding the tx")
+    output_addresses: list[str] = Field(..., description="Wallet addresses receiving funds")
+    input_amounts: list[float] = Field(..., description="BTC per input, aligned with input_addresses")
+    output_amounts: list[float] = Field(..., description="BTC per output, aligned with output_addresses")
+    fee: float = Field(..., description="Miner fee in BTC")
+    script_type: str = Field(..., description="e.g. P2PKH, P2SH, P2WPKH, P2TR")
+
+    # Geo enrichment (resolved offline from a local GeoLite2 database)
+    geo_country: str = Field(..., description="ISO country code of src_ip")
+    asn: str = Field(..., description="Autonomous system number / name of src_ip")
+
+
+class WalletAlert(BaseModel):
+    """The result of scoring a single wallet for suspicious activity."""
+
+    wallet_address: str = Field(..., description="The wallet this alert is about")
+    risk_score: float = Field(..., ge=0.0, le=1.0, description="0 = benign, 1 = certainly illicit")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="How much we trust this score")
+    severity: str = Field(..., description='One of "low", "medium", "high", "critical"')
+    top_reasons: list[str] = Field(
+        default_factory=list,
+        description="Plain-English explanations, ordered most important first",
+    )
+    connected_wallets: list[str] = Field(
+        default_factory=list,
+        description="Wallet addresses directly linked to this one in the graph",
+    )

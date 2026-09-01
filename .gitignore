@@ -1,0 +1,41 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Trained model binaries — regenerate with ml_baseline.py, don't commit
+backend/app/models_trained/
+
+# GeoLite2 database — licensed, download separately
+backend/app/data/*.mmdb
+
+# ---------- Node ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Data ----------
+# The Elliptic CSVs are large and externally sourced; generated datasets are
+# reproducible from data_generator.py. Keep the folder, skip the contents.
+data/*
+!data/.gitkeep
+!data/README.md
+
+# ---------- Editors / OS ----------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pandas
+networkx
+scikit-learn
+shap
+geoip2
+pydantic
+faker
+python-multipart
+joblib
