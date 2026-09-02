@@ -88,9 +88,9 @@ origin.
 | 0 | Project scaffold + schema lock | Backend B | **done** |
 | 1 | Synthetic data generator | Backend A | **done** |
 | 2 | Ingestion parser + graph builder | Backend A | **done** |
-| 3 | ML baseline on the Elliptic dataset | AI/ML | blocked — needs the Elliptic CSVs in `/data` |
+| 3 | ML baseline on the Elliptic dataset | AI/ML | **code done** — needs the real CSVs for quotable numbers |
 | 4 | Domain rule detectors | Cybersecurity | **done** |
-| 5 | Graph features + scoring + explainability | AI/ML | not started (needs 3) |
+| 5 | Graph features + scoring + explainability | AI/ML | not started — **read the warning below first** |
 | 6 | API layer | Backend B | not started |
 | 7 | Frontend: graph visualization | Frontend A | not started |
 | 8 | Frontend: dashboard + stats | Frontend B | not started |
@@ -123,7 +123,52 @@ python -m tests.test_domain_rules
 ```
 
 Runs the four detectors against a hand-built graph and prints what each one
-found, with its reasoning. `pytest tests/ -q` runs the same file as assertions.
+found, with its reasoning.
+
+```bash
+python -m app.services.ml_baseline
+```
+
+Trains the RandomForest and IsolationForest on the Elliptic dataset and saves
+them to `app/models_trained/`. Requires the three Elliptic CSVs in `/data`
+first — download "Elliptic Data Set" from Kaggle.
+
+```bash
+pytest tests/ -q
+```
+
+29 tests, no external data needed. The ML tests run against
+`tests/elliptic_fixture.py`, which reproduces the Elliptic schema so the
+pipeline stays covered on a fresh clone.
+
+## Warning for Phase 5: two feature spaces that do not meet
+
+The Phase 5 brief says `score_wallet` should combine graph features with a rule
+encoding into one vector and score it with the RandomForest from Phase 3.
+**That cannot work as written.**
+
+The Phase 3 models are trained on Elliptic's 166 anonymised columns, whose
+meaning was never published. The graph features in `feature_extraction.py` —
+degree, PageRank, velocity, amount variance — live in a completely different,
+roughly 12-column space. There is no mapping between them; Elliptic's features
+cannot be recomputed from our graph, and ours cannot be expressed in theirs.
+Passing one to a model fitted on the other raises, which is the good case.
+
+`app/models_trained/manifest.json` records the exact schema each model was
+fitted on so the mismatch surfaces immediately rather than silently.
+
+Realistic options for whoever takes Phase 5:
+
+1. **Train a second model on our own feature space**, labelled from
+   `data/ground_truth.json`, and use *that* inside `score_wallet`. Keep the
+   Elliptic models as a separately reported benchmark. This is the honest
+   version and the one that lets SHAP produce explanations an analyst can read,
+   since our features have names that mean something.
+2. Score wallets from the domain rules and graph features alone, and cite
+   Elliptic purely as external validation that the approach generalises.
+
+Either way, the Elliptic numbers still belong in the write-up — just not in the
+same code path as the wallet scorer.
 
 ## Detector accuracy
 
