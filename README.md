@@ -70,7 +70,26 @@ npm run dev
 ```
 
 Verify: http://localhost:5173 loads. The backend already allows CORS from that
-origin.
+origin. Point it elsewhere with `VITE_API_URL` if the backend is not on 8000.
+
+The app has two views over one shared wallet detail panel:
+
+- **Link analysis** — the force-directed graph. Wallets are circles coloured on
+  a green-to-red risk ramp and sized by score; IP addresses are grey squares,
+  so the two entity types never blur together. High and critical wallets carry
+  a pulsing ring, which is what makes them findable without clicking. Opens on
+  "Medium and up", because the unfiltered graph is ~1,700 nodes and 20,000
+  links and reads as a hairball. **"Critical only" is the view to demo** — 210
+  nodes where the planted structures are visible as distinct clusters.
+- **Dashboard** — transactions processed, wallets scored, wallets flagged, a
+  labelled severity distribution, and a sortable, filterable alert table.
+
+Clicking a node or a table row opens the same panel, showing the risk score,
+confidence, severity, the full plain-English reasons, and the wallet's
+counterparties as chips you can click to walk the network.
+
+**Upload dataset** in the header POSTs to `/ingest` and refreshes both views —
+that is the live-ingestion moment for the demo.
 
 ### Order that matters
 
@@ -143,8 +162,8 @@ succeeding on a machine that happens to be online.
 | 4 | Domain rule detectors | Cybersecurity | **done** |
 | 5 | Graph features + scoring + explainability | AI/ML | **done** |
 | 6 | API layer | Backend B | **done** |
-| 7 | Frontend: graph visualization | Frontend A | not started — the API is live, build against it |
-| 8 | Frontend: dashboard + stats | Frontend B | not started — the API is live, build against it |
+| 7 | Frontend: graph visualization | Frontend A | **done** |
+| 8 | Frontend: dashboard + stats | Frontend B | **done** |
 | 9 | Full integration pass | Everyone | not started |
 
 Pull before starting your phase; commit and push when you finish, so the next

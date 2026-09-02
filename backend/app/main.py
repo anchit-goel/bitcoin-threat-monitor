@@ -225,12 +225,23 @@ def _explain(wallet: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Unknown wallet: {wallet}")
 
     if not alert["top_reasons"] and state.graph is not None:
-        fresh = scoring.score_wallet(
-            state.graph, wallet, state.rf_model, state.iso_model,
-            state.manifest, explain=True,
+        scoring.attach_explanations(
+            state.graph, [alert], state.rf_model, state.manifest
         )
-        alert["top_reasons"] = fresh["top_reasons"]
     return alert
+
+
+def _explain_all(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensure a whole page of alerts carries its reasons, in one SHAP pass.
+
+    Calling _explain per alert would issue one SHAP call each; a page of a
+    thousand alerts took minutes that way.
+    """
+    if state.graph is not None:
+        scoring.attach_explanations(
+            state.graph, alerts, state.rf_model, state.manifest
+        )
+    return alerts
 
 
 def _trim(payload: dict[str, Any], limit: int | None) -> GraphPayload:
@@ -342,10 +353,8 @@ def alerts(
         ]
 
     # Make sure everything actually returned carries its reasons.
-    return [
-        WalletAlert.model_validate(_explain(a["wallet_address"]))
-        for a in selected[:limit]
-    ]
+    page = _explain_all(selected[:limit])
+    return [WalletAlert.model_validate(a) for a in page]
 
 
 @app.get("/wallet/{wallet_address}", response_model=WalletDetail, tags=["pipeline"])

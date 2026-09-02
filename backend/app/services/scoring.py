@@ -178,6 +178,63 @@ def score_wallet_alert(*args, **kwargs) -> WalletAlert:
     return WalletAlert.model_validate(score_wallet(*args, **kwargs))
 
 
+def attach_explanations(
+    graph: nx.DiGraph,
+    alerts: list[dict[str, Any]],
+    rf_model,
+    manifest: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Fill in `top_reasons` for any alert that lacks them, in one SHAP pass.
+
+    Bulk scoring leaves explanations off, and ingest only precomputes the top
+    of the list. Everything below that gets explained here, on demand. Doing it
+    one wallet at a time is what makes that expensive: the API served a page of
+    1,352 alerts by making 1,200 separate SHAP calls, which took minutes.
+
+    Mutates the alerts in place (they are the cached objects) and returns them.
+    """
+    from app.services.feature_extraction import extract_all_wallets
+
+    pending = [a for a in alerts if not a["top_reasons"]]
+    if not pending:
+        return alerts
+
+    features = extract_all_wallets(graph)
+    names = (manifest or {}).get("feature_columns") or wallet_model.ALL_FEATURE_NAMES
+    addresses = [a["wallet_address"] for a in pending if a["wallet_address"] in features.index]
+    if not addresses:
+        return alerts
+
+    findings = {w: domain_rules.run_all_rules(graph, w) for w in addresses}
+    flags = pd.DataFrame(
+        [
+            {
+                f"rule_{name}": int(any(f["rule"] == name for f in findings[w]))
+                for name in domain_rules.ALL_RULES
+            }
+            for w in addresses
+        ],
+        index=pd.Index(addresses),
+        columns=wallet_model.RULE_FEATURE_NAMES,
+    )
+    matrix = pd.concat([features.loc[addresses], flags], axis=1)[names]
+    rf_probs = rf_model.predict_proba(matrix)[:, 1]
+
+    reasons = explainability.explain_many(
+        rf_model,
+        matrix,
+        [features.loc[w].to_dict() for w in addresses],
+        [findings[w] for w in addresses],
+        [float(p) >= 0.5 for p in rf_probs],
+        reference=(manifest or {}).get("reference"),
+    )
+
+    by_address = {a["wallet_address"]: a for a in pending}
+    for address, alert_reasons in zip(addresses, reasons):
+        by_address[address]["top_reasons"] = alert_reasons
+    return alerts
+
+
 def score_all_wallets(
     graph: nx.DiGraph,
     rf_model,
