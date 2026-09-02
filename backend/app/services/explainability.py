@@ -162,31 +162,119 @@ def _get_explainer(rf_model):
     return explainer
 
 
-def _illicit_shap_values(rf_model, feature_vector, feature_names) -> np.ndarray | None:
-    """SHAP values for the illicit class, one per feature.
+def illicit_shap_matrix(rf_model, frame) -> np.ndarray | None:
+    """SHAP values for the illicit class over a whole frame: (rows, features).
+
+    Taking the batch in one call matters. Explaining 150 wallets one at a time
+    added 21 seconds to an ingest; one call over the same 150 rows costs a
+    fraction of that, because the per-call overhead of walking a 300-tree
+    forest is paid once instead of 150 times.
 
     Returns None if SHAP cannot run, so scoring degrades to rule-only reasons
     rather than failing outright.
     """
     try:
-        import pandas as pd
-
         explainer = _get_explainer(rf_model)
-        frame = pd.DataFrame([feature_vector], columns=feature_names)
         raw = explainer.shap_values(frame, check_additivity=False)
     except Exception:
         return None
 
     values = np.asarray(raw)
-    # shap returns either (1, n_features, n_classes) or a per-class list,
+    # shap returns either (rows, features, classes) or a per-class list,
     # depending on version; normalise both to the illicit column.
     if values.ndim == 3:
-        return values[0, :, -1]
+        return values[:, :, -1]
     if values.ndim == 2:
-        return values[0]
+        return values
     if isinstance(raw, list) and raw:
-        return np.asarray(raw[-1])[0]
+        return np.asarray(raw[-1])
     return None
+
+
+def _illicit_shap_values(rf_model, feature_vector, feature_names) -> np.ndarray | None:
+    """SHAP values for one wallet."""
+    import pandas as pd
+
+    matrix = illicit_shap_matrix(
+        rf_model, pd.DataFrame([feature_vector], columns=feature_names)
+    )
+    return None if matrix is None else matrix[0]
+
+
+def reasons_from_shap(
+    shap_row,
+    features: dict[str, float],
+    names: list[str],
+    medians: dict[str, float],
+    verdict_illicit: bool,
+) -> list[str]:
+    """Turn one row of SHAP values into sentences."""
+    if shap_row is None:
+        return []
+
+    candidates = []
+    for i, name in enumerate(names):
+        if i >= len(shap_row) or name.startswith(RULE_FEATURE_PREFIX):
+            continue
+        contribution = float(shap_row[i])
+        # Only reasons that argue the same way as the verdict.
+        if verdict_illicit and contribution <= 0:
+            continue
+        if not verdict_illicit and contribution >= 0:
+            continue
+        candidates.append((name, contribution))
+
+    candidates.sort(key=lambda kv: abs(kv[1]), reverse=True)
+
+    out: list[str] = []
+    for name, contribution in candidates[:MAX_SHAP_REASONS]:
+        phrases = FEATURE_PHRASES.get(name)
+        if not phrases or abs(contribution) < 1e-6:
+            continue
+        value = float(features.get(name, 0.0))
+        # The value decides the wording, not the attribution's sign.
+        side = "above" if value > float(medians.get(name, 0.0)) else "below"
+        sentence = phrases[side](value)
+        if sentence not in out:
+            out.append(sentence)
+    return out
+
+
+def explain_many(
+    rf_model,
+    frame,
+    feature_dicts: list[dict[str, float]],
+    findings_per_wallet: list[list[dict[str, Any]]],
+    verdicts: list[bool],
+    reference: dict[str, Any] | None = None,
+    max_reasons: int = 6,
+) -> list[list[str]]:
+    """Explain a batch of wallets with a single SHAP pass.
+
+    `frame` carries one row per wallet in the same order as the other lists.
+    """
+    medians = (reference or {}).get("median") or DEFAULT_MEDIANS
+    names = list(frame.columns)
+    matrix = illicit_shap_matrix(rf_model, frame)
+
+    results: list[list[str]] = []
+    for i, features in enumerate(feature_dicts):
+        findings = findings_per_wallet[i]
+        reasons = [f["reason"] for f in findings]
+
+        if not verdicts[i] and not findings:
+            results.append(_benign_summary(features)[:max_reasons])
+            continue
+
+        row = None if matrix is None else matrix[i]
+        for sentence in reasons_from_shap(row, features, names, medians, verdicts[i]):
+            if sentence not in reasons:
+                reasons.append(sentence)
+
+        if not reasons:
+            reasons.append("Flagged by the model, but no single feature stood out")
+        results.append(reasons[:max_reasons])
+    return results
 
 
 # --------------------------------------------------------------------------
@@ -267,31 +355,11 @@ def explain_wallet(
     medians = (reference or {}).get("median") or DEFAULT_MEDIANS
 
     shap_values = _illicit_shap_values(rf_model, feature_vector, names)
-    if shap_values is not None:
-        candidates = []
-        for i, name in enumerate(names):
-            if i >= len(shap_values) or name.startswith(RULE_FEATURE_PREFIX):
-                continue
-            contribution = float(shap_values[i])
-            # Only reasons that argue the same way as the verdict.
-            if verdict_illicit and contribution <= 0:
-                continue
-            if not verdict_illicit and contribution >= 0:
-                continue
-            candidates.append((name, contribution))
-
-        candidates.sort(key=lambda kv: abs(kv[1]), reverse=True)
-
-        for name, contribution in candidates[:MAX_SHAP_REASONS]:
-            phrases = FEATURE_PHRASES.get(name)
-            if not phrases or abs(contribution) < 1e-6:
-                continue
-            value = float(features.get(name, 0.0))
-            # The value decides the wording, not the attribution's sign.
-            side = "above" if value > float(medians.get(name, 0.0)) else "below"
-            sentence = phrases[side](value)
-            if sentence not in reasons:
-                reasons.append(sentence)
+    for sentence in reasons_from_shap(
+        shap_values, features, names, medians, verdict_illicit
+    ):
+        if sentence not in reasons:
+            reasons.append(sentence)
 
     if not reasons:
         reasons.append(

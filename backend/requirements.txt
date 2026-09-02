@@ -10,3 +10,4 @@ faker
 python-multipart
 joblib
 pytest
+httpx

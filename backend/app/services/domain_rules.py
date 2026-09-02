@@ -62,7 +62,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any, Iterable
+from typing import Any
 
 import networkx as nx
 
@@ -103,11 +103,42 @@ def _transfers(graph: nx.DiGraph, src: str, dst: str) -> list[dict[str, Any]]:
     return data.get("transfers", [])
 
 
+# Memoised transfer lists, keyed by graph size so a rebuilt graph recomputes.
+#
+# The detectors ask for a wallet's transfers over and over - _walk_peel_chain
+# alone calls _peel_hop up to thirty times, and each call rebuilt the same list
+# from the edges. Caching them cut the rule pass over 1,352 wallets from about
+# 12 seconds to a fraction of that, which is most of the cost of an ingest.
+#
+# The cached lists are shared, so callers must treat them as read-only. Every
+# detector already builds a new list when it filters, so none of them mutate.
+_TRANSFER_CACHE = "_rule_transfer_cache"
+
+
+def _cache(graph: nx.DiGraph) -> dict[str, dict]:
+    # Only the node count is checked, and deliberately so.
+    # networkx's number_of_edges() is O(V) - it sums degrees across every node -
+    # so calling it on every cache lookup cost 100 million generator steps and
+    # made the "optimisation" slower than no cache at all. number_of_nodes() is
+    # a dict length. build_graph returns a fresh object each time, so a rebuilt
+    # graph arrives with no cache regardless.
+    cached = graph.graph.get(_TRANSFER_CACHE)
+    if cached is None or cached["nodes"] != graph.number_of_nodes():
+        cached = {"nodes": graph.number_of_nodes(), "out": {}, "in": {}, "nbr": {}}
+        graph.graph[_TRANSFER_CACHE] = cached
+    return cached
+
+
 def _outgoing(graph: nx.DiGraph, wallet: str) -> list[dict[str, Any]]:
     """Every individual outgoing value movement, oldest first.
 
     Broadcast (wallet <-> IP) edges are excluded; they carry no value.
     """
+    store = _cache(graph)["out"]
+    hit = store.get(wallet)
+    if hit is not None:
+        return hit
+
     out: list[dict[str, Any]] = []
     for _, dst in graph.out_edges(wallet):
         if not _is_wallet(graph, dst):
@@ -115,11 +146,17 @@ def _outgoing(graph: nx.DiGraph, wallet: str) -> list[dict[str, Any]]:
         for t in _transfers(graph, wallet, dst):
             out.append({**t, "counterparty": dst})
     out.sort(key=lambda t: t["timestamp"])
+    store[wallet] = out
     return out
 
 
 def _incoming(graph: nx.DiGraph, wallet: str) -> list[dict[str, Any]]:
     """Every individual incoming value movement, oldest first."""
+    store = _cache(graph)["in"]
+    hit = store.get(wallet)
+    if hit is not None:
+        return hit
+
     out: list[dict[str, Any]] = []
     for src, _ in graph.in_edges(wallet):
         if not _is_wallet(graph, src):
@@ -127,13 +164,22 @@ def _incoming(graph: nx.DiGraph, wallet: str) -> list[dict[str, Any]]:
         for t in _transfers(graph, src, wallet):
             out.append({**t, "counterparty": src})
     out.sort(key=lambda t: t["timestamp"])
+    store[wallet] = out
     return out
 
 
 def _wallet_neighbours(graph: nx.DiGraph, wallet: str, direction: str) -> list[str]:
+    store = _cache(graph)["nbr"]
+    key = (wallet, direction)
+    hit = store.get(key)
+    if hit is not None:
+        return hit
+
     edges = graph.out_edges(wallet) if direction == "out" else graph.in_edges(wallet)
     idx = 1 if direction == "out" else 0
-    return [e[idx] for e in edges if _is_wallet(graph, e[idx])]
+    result = [e[idx] for e in edges if _is_wallet(graph, e[idx])]
+    store[key] = result
+    return result
 
 
 def _result(

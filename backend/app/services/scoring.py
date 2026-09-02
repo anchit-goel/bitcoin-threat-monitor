@@ -184,8 +184,14 @@ def score_all_wallets(
     iso_model,
     manifest: dict | None = None,
     explain: bool = False,
+    explain_top: int = 0,
 ) -> list[dict[str, Any]]:
     """Score every wallet in the graph, highest risk first.
+
+    `explain_top` builds explanations for the N riskiest wallets only, in one
+    batched SHAP pass. That is what the API uses on ingest: nobody reads the
+    reasons on the nine-hundredth row of a list sorted by risk, and the rest
+    are built on demand when a wallet is opened.
 
     Predictions are batched rather than made one wallet at a time. A single-row
     call to a 300-tree forest is dominated by per-call overhead, so scoring
@@ -206,8 +212,20 @@ def score_all_wallets(
         return []
 
     wallets = list(features.index)
+    # Keep the findings, not just the flags - the explanation layer needs the
+    # reasons, and running every rule a second time to recover them would cost
+    # as much as the scoring itself.
+    findings_by_wallet = {w: domain_rules.run_all_rules(graph, w) for w in wallets}
     flags = pd.DataFrame(
-        [domain_rules.rule_vector(graph, w) for w in wallets],
+        [
+            {
+                f"rule_{name}": int(
+                    any(f["rule"] == name for f in findings_by_wallet[w])
+                )
+                for name in domain_rules.ALL_RULES
+            }
+            for w in wallets
+        ],
         index=features.index,
         columns=wallet_model.RULE_FEATURE_NAMES,
     )
@@ -233,15 +251,26 @@ def score_all_wallets(
             "top_reasons": [],
             "connected_wallets": connected_wallets(graph, wallet),
         }
-        if explain:
-            alert["top_reasons"] = explainability.explain_wallet(
-                graph, wallet, rf_model, [float(v) for v in matrix.iloc[i]],
-                features=features.loc[wallet].to_dict(),
-                feature_names=list(names),
-                reference=(manifest or {}).get("reference"),
-                verdict_illicit=rf_prob >= 0.5,
-            )
+        alert["_rf_prob"] = rf_prob
         alerts.append(alert)
 
     alerts.sort(key=lambda a: a["risk_score"], reverse=True)
+
+    wanted = len(alerts) if explain else min(max(explain_top, 0), len(alerts))
+    if wanted:
+        chosen = alerts[:wanted]
+        addresses = [a["wallet_address"] for a in chosen]
+        reasons = explainability.explain_many(
+            rf_model,
+            matrix.loc[addresses],
+            [features.loc[w].to_dict() for w in addresses],
+            [findings_by_wallet[w] for w in addresses],
+            [a["_rf_prob"] >= 0.5 for a in chosen],
+            reference=(manifest or {}).get("reference"),
+        )
+        for alert, alert_reasons in zip(chosen, reasons):
+            alert["top_reasons"] = alert_reasons
+
+    for alert in alerts:
+        alert.pop("_rf_prob", None)
     return alerts

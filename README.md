@@ -74,10 +74,61 @@ origin.
 
 ### Order that matters
 
-- The ML models must be trained and saved (Phase 3) **before** the API tries to
-  load them at startup.
-- A dataset must be POSTed to `/ingest` **before** `/alerts` or `/graph` return
-  anything — the graph lives in memory and starts empty.
+1. **Train the models first.** `python -m app.services.wallet_model` from
+   `/backend`. The API loads them once at startup; without them it still comes
+   up, but `/ingest` returns 503 and `/health` says why.
+2. **POST a dataset to `/ingest`.** The graph lives in memory and starts empty,
+   so `/alerts` and `/graph` return 409 until something is loaded. `/health`
+   reports which of the two is missing, so a blank dashboard is never a mystery.
+
+```bash
+curl -X POST http://localhost:8000/ingest -F "file=@../data/synthetic_transactions.json"
+```
+
+## API
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /health` | Liveness, plus whether models and a graph are loaded |
+| `POST /ingest` | Upload JSON/CSV/XML, build the graph, score every wallet |
+| `GET /alerts` | Scored wallets, highest risk first. `min_severity`, `limit` |
+| `GET /wallet/{address}` | One alert plus its neighbourhood. `hops`, `limit` |
+| `GET /graph` | The scored graph. `min_risk`, `limit`, `include_ips` |
+| `DELETE /graph` | Drop the loaded dataset, for resetting between demo runs |
+
+Interactive docs at http://localhost:8000/docs.
+
+Measured on the 5,078-transaction demo dataset:
+
+| Call | Time |
+| --- | --- |
+| `POST /ingest` (5,078 tx → 1,352 wallets scored) | 3.5 s |
+| `GET /alerts?limit=100` | 0.22 s |
+| `GET /graph?min_risk=0.8` | 0.31 s |
+| `GET /wallet/{address}` | 1.0 s |
+
+Two things worth knowing before you build against it:
+
+- **`/graph` trims by default.** The full graph has ~20,000 links and will lock
+  up a browser. It returns the 600 riskiest nodes unless you raise `limit`, and
+  sets `truncated: true` when it has dropped anything. `?min_risk=0.8` gives a
+  ~210-node view, which is the one to demo.
+- **Explanations are built for the top 150 wallets at ingest**, and on demand
+  for anything below that. A client cannot tell the difference — every alert
+  returned carries its `top_reasons` — but it keeps ingest at 3.5 s instead of
+  paying SHAP for a thousand wallets nobody opens.
+
+### Nothing reaches the network
+
+Geo enrichment reads a local MaxMind database at
+`backend/app/data/GeoLite2-City.mmdb`. It is not committed — download
+GeoLite2-City from MaxMind if you want geo data. Without it, `lookup` returns
+None and everything else carries on; geo is enrichment, not a dependency.
+
+`tests/test_api.py` asserts this rather than trusting it: it replaces every
+outbound socket call with something that raises, then runs a full ingest and
+score. Anything reaching for the network fails the test instead of quietly
+succeeding on a machine that happens to be online.
 
 ---
 
@@ -91,9 +142,9 @@ origin.
 | 3 | ML baseline on the Elliptic dataset | AI/ML | **code done** — needs the real CSVs for quotable numbers |
 | 4 | Domain rule detectors | Cybersecurity | **done** |
 | 5 | Graph features + scoring + explainability | AI/ML | **done** |
-| 6 | API layer | Backend B | not started |
-| 7 | Frontend: graph visualization | Frontend A | not started |
-| 8 | Frontend: dashboard + stats | Frontend B | not started |
+| 6 | API layer | Backend B | **done** |
+| 7 | Frontend: graph visualization | Frontend A | not started — the API is live, build against it |
+| 8 | Frontend: dashboard + stats | Frontend B | not started — the API is live, build against it |
 | 9 | Full integration pass | Everyone | not started |
 
 Pull before starting your phase; commit and push when you finish, so the next
@@ -137,7 +188,7 @@ first — download "Elliptic Data Set" from Kaggle.
 pytest tests/ -q
 ```
 
-49 tests, no external data needed. The ML tests run against
+72 tests, no external data needed. The ML tests run against
 `tests/elliptic_fixture.py`, which reproduces the Elliptic schema so the
 pipeline stays covered on a fresh clone.
 

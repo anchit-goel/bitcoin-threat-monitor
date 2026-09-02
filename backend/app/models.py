@@ -73,3 +73,59 @@ class WalletAlert(BaseModel):
         default_factory=list,
         description="Wallet addresses directly linked to this one in the graph",
     )
+
+
+# --------------------------------------------------------------------------
+# API response shapes
+#
+# These wrap the two core models above for transport. They live here rather
+# than in main.py because the frontend builds against them too, and this file
+# is where the team looks for the shapes it can rely on.
+# --------------------------------------------------------------------------
+
+
+class GraphPayload(BaseModel):
+    """A graph serialized for react-force-graph.
+
+    `truncated` matters: the full demo graph has ~20,000 links, which will
+    lock up a browser. When the server trims the payload it says so, rather
+    than quietly returning a different graph than the one that was asked for.
+    """
+
+    nodes: list[dict] = Field(default_factory=list)
+    links: list[dict] = Field(default_factory=list)
+    total_nodes: int = Field(0, description="Nodes in the full graph, before filtering")
+    total_links: int = Field(0, description="Links in the full graph, before filtering")
+    truncated: bool = Field(False, description="True if nodes or links were dropped")
+
+
+class WalletDetail(WalletAlert):
+    """A WalletAlert plus the neighbourhood around it, for the detail panel."""
+
+    subgraph: GraphPayload = Field(default_factory=GraphPayload)
+    hops: int = Field(2, description="How many hops of the graph the subgraph spans")
+
+
+class IngestSummary(BaseModel):
+    """What POST /ingest reports back."""
+
+    status: str = "processed"
+    filename: str | None = None
+    transactions: int = 0
+    wallets_scored: int = 0
+    high_risk_count: int = Field(
+        0, description='Wallets at severity "high" or "critical"'
+    )
+    duration_seconds: float = 0.0
+
+
+class HealthStatus(BaseModel):
+    """Liveness plus enough state to tell why the dashboard might be empty."""
+
+    status: str = "ok"
+    graph_loaded: bool = False
+    transactions: int = 0
+    wallets_scored: int = 0
+    models_loaded: bool = False
+    model_feature_space: str | None = None
+    geoip_available: bool = False

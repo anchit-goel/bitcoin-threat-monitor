@@ -62,7 +62,9 @@ def _wallet_projection(graph: nx.DiGraph) -> nx.DiGraph:
 
 def _global_metrics(graph: nx.DiGraph) -> dict[str, Any]:
     """Compute (once) the measures that depend on the whole graph."""
-    signature = (graph.number_of_nodes(), graph.number_of_edges())
+    # Node count only: networkx's number_of_edges() is O(V), and this is
+    # consulted once per wallet. See the note in domain_rules._cache.
+    signature = graph.number_of_nodes()
     cached = graph.graph.get(_CACHE_KEY)
     if cached is not None and cached["signature"] == signature:
         return cached
