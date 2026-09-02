@@ -90,7 +90,7 @@ origin.
 | 2 | Ingestion parser + graph builder | Backend A | **done** |
 | 3 | ML baseline on the Elliptic dataset | AI/ML | **code done** — needs the real CSVs for quotable numbers |
 | 4 | Domain rule detectors | Cybersecurity | **done** |
-| 5 | Graph features + scoring + explainability | AI/ML | not started — **read the warning below first** |
+| 5 | Graph features + scoring + explainability | AI/ML | **done** |
 | 6 | API layer | Backend B | not started |
 | 7 | Frontend: graph visualization | Frontend A | not started |
 | 8 | Frontend: dashboard + stats | Frontend B | not started |
@@ -137,15 +137,15 @@ first — download "Elliptic Data Set" from Kaggle.
 pytest tests/ -q
 ```
 
-29 tests, no external data needed. The ML tests run against
+49 tests, no external data needed. The ML tests run against
 `tests/elliptic_fixture.py`, which reproduces the Elliptic schema so the
 pipeline stays covered on a fresh clone.
 
-## Warning for Phase 5: two feature spaces that do not meet
+## Resolved: two feature spaces that do not meet
 
-The Phase 5 brief says `score_wallet` should combine graph features with a rule
+The Phase 5 brief said `score_wallet` should combine graph features with a rule
 encoding into one vector and score it with the RandomForest from Phase 3.
-**That cannot work as written.**
+**That could not work as written**, and option 1 below is what was built.
 
 The Phase 3 models are trained on Elliptic's 166 anonymised columns, whose
 meaning was never published. The graph features in `feature_extraction.py` —
@@ -167,8 +167,42 @@ Realistic options for whoever takes Phase 5:
 2. Score wallets from the domain rules and graph features alone, and cite
    Elliptic purely as external validation that the approach generalises.
 
-Either way, the Elliptic numbers still belong in the write-up — just not in the
-same code path as the wallet scorer.
+**Option 1 is what `wallet_model.py` does.** The Elliptic numbers still belong
+in the write-up, just not in the same code path as the wallet scorer.
+`scoring.py` raises a named error if an Elliptic-shaped model reaches it.
+
+## Scoring accuracy
+
+`wallet_model.py` trains on one seeded dataset and evaluates on a **separately
+seeded** one — different wallets, different addresses, different injected
+patterns. Training and testing on the same generated data would report
+memorisation as accuracy.
+
+Measured on the held-out seed, 1,332 wallets, 95 planted:
+
+| Approach | Precision | Recall | F1 |
+| --- | --- | --- | --- |
+| Domain rules alone | 89% | 87% | 88% |
+| Combined score >= 0.30 (medium+) | 84% | 98% | 90% |
+| Combined score >= 0.55 (high+) | 91% | 96% | 93% |
+| **Combined score >= 0.80 (critical)** | **99%** | **92%** | **95%** |
+
+The rules and the model are genuinely complementary: of the 12 planted wallets
+the rules miss, the model catches 10. Two findings worth knowing:
+
+- **The rule flags add nothing to the model's accuracy.** Trained with and
+  without them the forest scores identically — the graph features already
+  carry the signal, led by transaction velocity at 25% importance. The rules
+  earn their place as *evidence and explanation*, not as model input.
+- Scoring is batched. Predicting one wallet at a time against a 300-tree forest
+  cost ~90 ms per wallet; batching the whole matrix cut a full ingest from 122 s
+  to 5.3 s, with identical scores (there is a test asserting exactly that).
+
+```bash
+python -m app.services.wallet_model
+```
+
+Trains and saves the wallet-space models. Run it before starting the API.
 
 ## Detector accuracy
 
