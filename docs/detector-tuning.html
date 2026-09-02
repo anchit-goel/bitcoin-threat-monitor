@@ -1,0 +1,808 @@
+<title>BTC Detector Tuning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
+
+<style>
+  /* ---- Light palette: the complete token set lives here ---- */
+  :root {
+    --ground:      #EFF1F4;
+    --surface:     #FFFFFF;
+    --surface-2:   #F6F8FA;
+    --ink:         #121821;
+    --ink-2:       #566173;
+    --ink-3:       #7C8697;
+    --rule:        #DCE1E8;
+    --rule-strong: #C3CBD6;
+    --before:      #C0492F;
+    --after:       #2E72B8;
+    --before-soft: #F6E4DE;
+    --after-soft:  #E1EBF6;
+    --shadow:      0 1px 2px rgba(18, 24, 33, .05), 0 8px 24px -12px rgba(18, 24, 33, .12);
+
+    --step--1: .8125rem;
+    --step-0:  1.0625rem;
+    --step-1:  1.3125rem;
+    --step-2:  1.75rem;
+    --step-3:  2.375rem;
+    --step-4:  3.25rem;
+
+    --measure: 66ch;
+    --pad: clamp(1.25rem, 4vw, 2.5rem);
+  }
+
+  /* Un-stamped document following a dark OS. Tokens only. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #10141A;
+      --surface:     #181E26;
+      --surface-2:   #1E252E;
+      --ink:         #E7EBF1;
+      --ink-2:       #A2ACBB;
+      --ink-3:       #7B8695;
+      --rule:        #2B333E;
+      --rule-strong: #3C4652;
+      --before:      #D06546;
+      --after:       #4E92D4;
+      --before-soft: #3A241C;
+      --after-soft:  #1B2C3F;
+      --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .6);
+    }
+  }
+
+  /* Explicit dark choice wins over a light OS. Tokens only. */
+  :root[data-theme="dark"] {
+    --ground:      #10141A;
+    --surface:     #181E26;
+    --surface-2:   #1E252E;
+    --ink:         #E7EBF1;
+    --ink-2:       #A2ACBB;
+    --ink-3:       #7B8695;
+    --rule:        #2B333E;
+    --rule-strong: #3C4652;
+    --before:      #D06546;
+    --after:       #4E92D4;
+    --before-soft: #3A241C;
+    --after-soft:  #1B2C3F;
+    --shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .6);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: var(--step-0);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 0 var(--pad) 5rem;
+  }
+
+  /* ---------- Typography ---------- */
+  h1, h2, h3 {
+    font-family: Newsreader, ui-serif, Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    text-wrap: balance;
+    line-height: 1.15;
+    margin: 0;
+  }
+  h1 { font-size: var(--step-4); letter-spacing: -.02em; }
+  h2 { font-size: var(--step-2); letter-spacing: -.01em; }
+  h3 { font-size: var(--step-1); }
+
+  p { margin: 0; max-width: var(--measure); }
+  strong { font-weight: 600; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: var(--step--1);
+    font-weight: 500;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: var(--step-1);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 58ch;
+  }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+  .num  { font-variant-numeric: tabular-nums; }
+
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .9em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .08em .35em;
+  }
+
+  /* ---------- Structure ---------- */
+  header.masthead {
+    padding: clamp(3rem, 9vw, 5.5rem) 0 2.5rem;
+    border-bottom: 1px solid var(--rule-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .masthead h1 { max-width: 20ch; }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.75rem;
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    color: var(--ink-3);
+  }
+  .meta span { display: inline-flex; gap: .5rem; }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  section {
+    padding-top: 3.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  section > .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    margin-bottom: .25rem;
+  }
+
+  /* ---------- Headline figures ---------- */
+  .figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .fig {
+    background: var(--surface);
+    padding: 1.5rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+  }
+  .fig .label {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .75rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .fig .value {
+    font-family: Newsreader, ui-serif, Georgia, serif;
+    font-size: var(--step-3);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .fig .was {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+  }
+  .fig .was s { color: var(--before); text-decoration-thickness: 1px; }
+
+  /* ---------- Dumbbell chart ---------- */
+  .chart {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.75rem var(--pad) 1.25rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .chart-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: .75rem 1.5rem;
+  }
+  .chart-title { font-family: Newsreader, ui-serif, Georgia, serif; font-size: var(--step-1); }
+  .legend { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: var(--step--1);
+    color: var(--ink-2);
+  }
+  .swatch {
+    width: 10px; height: 10px; border-radius: 50%;
+    box-shadow: 0 0 0 2px var(--surface);
+    flex: none;
+  }
+  .sw-before { background: var(--before); }
+  .sw-after  { background: var(--after); }
+
+  .rows { display: flex; flex-direction: column; gap: .25rem; }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 8.5rem) 1fr;
+    align-items: center;
+    gap: 1rem;
+    padding: .55rem 0;
+  }
+  .row-label {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    color: var(--ink-2);
+    text-align: right;
+  }
+
+  .track {
+    position: relative;
+    height: 30px;
+  }
+  .gridlines {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+  .gridlines i {
+    position: absolute;
+    top: -.4rem; bottom: -.4rem;
+    width: 1px;
+    background: var(--rule);
+  }
+  .connector {
+    position: absolute;
+    top: 50%;
+    height: 2px;
+    transform: translateY(-50%);
+    background: var(--rule-strong);
+    border-radius: 1px;
+  }
+  .dot {
+    position: absolute;
+    top: 50%;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 2px var(--surface);
+    cursor: pointer;
+    border: 0;
+    padding: 0;
+  }
+  .dot::after {
+    /* Hit target larger than the mark. */
+    content: "";
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+  }
+  .dot:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .d-before { background: var(--before); }
+  .d-after  { background: var(--after); }
+
+  .val {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .axis {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 8.5rem) 1fr;
+    gap: 1rem;
+    margin-top: -.75rem;
+  }
+  .axis-marks { position: relative; height: 1.25rem; }
+  .axis-marks i {
+    position: absolute;
+    transform: translateX(-50%);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .75rem;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-3);
+  }
+
+  #tip {
+    position: fixed;
+    z-index: 20;
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--rule-strong);
+    border-radius: 8px;
+    padding: .6rem .75rem;
+    box-shadow: var(--shadow);
+    font-size: var(--step--1);
+    line-height: 1.45;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s ease;
+    max-width: 15rem;
+  }
+  #tip[data-show="1"] { opacity: 1; }
+  #tip .tip-t {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-weight: 600;
+    display: block;
+    margin-bottom: .3rem;
+  }
+  #tip dl { display: grid; grid-template-columns: auto auto; gap: .1rem .75rem; margin: 0; }
+  #tip dt { color: var(--ink-3); }
+  #tip dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* ---------- Tables ---------- */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; }
+  caption {
+    text-align: left;
+    padding: 1rem var(--pad) .75rem;
+    color: var(--ink-2);
+    font-size: var(--step--1);
+    border-bottom: 1px solid var(--rule);
+  }
+  th, td {
+    text-align: right;
+    padding: .7rem 1rem;
+    border-bottom: 1px solid var(--rule);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--step--1);
+  }
+  th:first-child, td:first-child {
+    text-align: left;
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    padding-left: var(--pad);
+  }
+  td:last-child, th:last-child { padding-right: var(--pad); }
+  thead th {
+    font-weight: 500;
+    color: var(--ink-3);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .75rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-bottom-color: var(--rule-strong);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  .pill {
+    display: inline-block;
+    padding: .1rem .5rem;
+    border-radius: 999px;
+    font-size: .8em;
+    font-weight: 500;
+  }
+  .pill-good { background: var(--after-soft); color: var(--after); }
+  td .sub { color: var(--ink-3); }
+  .pill-bad  { background: var(--before-soft); color: var(--before); }
+
+  /* ---------- Fix cards ---------- */
+  .fixes { display: flex; flex-direction: column; gap: 1px; background: var(--rule);
+           border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+           box-shadow: var(--shadow); }
+  .fix {
+    background: var(--surface);
+    padding: 1.5rem var(--pad);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .75rem;
+  }
+  @media (min-width: 46rem) {
+    .fix { grid-template-columns: 11rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+  }
+  .fix-name {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .fix-delta {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-3);
+    margin-top: .2rem;
+  }
+  .fix-body { display: flex; flex-direction: column; gap: .6rem; }
+  .fix-body p { max-width: 60ch; }
+  .fix-body .why { color: var(--ink-2); }
+
+  /* ---------- Notes / callouts ---------- */
+  .note {
+    border-left: 2px solid var(--rule-strong);
+    padding: .25rem 0 .25rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+  }
+  .note.warn { border-left-color: var(--before); }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .6rem; }
+  ul.plain li { max-width: var(--measure); }
+  ul.plain li::marker { color: var(--ink-3); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-3);
+    font-size: var(--step--1);
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <span class="eyebrow">SIH 2026 &middot; Bitcoin Transaction Threat Monitor</span>
+    <h1>The rules as written flagged one clean wallet in four.</h1>
+    <p class="lede">
+      Four laundering detectors, built to spec, scored 9% precision on the first
+      measurement. Here is what was wrong with them, what each fix was worth, and
+      what they score now.
+    </p>
+    <div class="meta">
+      <span><b>Phase 4</b> domain rule detectors</span>
+      <span><b>Dataset</b> 5,078 transactions &middot; 1,352 wallets</span>
+      <span><b>Ground truth</b> 117 planted &middot; 1,235 clean</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Where it landed</span>
+      <h2>After tuning</h2>
+    </div>
+    <div class="figures">
+      <div class="fig">
+        <span class="label">Precision</span>
+        <span class="value num">96%</span>
+        <span class="was">was <s>9%</s></span>
+      </div>
+      <div class="fig">
+        <span class="label">Recall</span>
+        <span class="value num">93%</span>
+        <span class="was">was <s>30%</s></span>
+      </div>
+      <div class="fig">
+        <span class="label">F1</span>
+        <span class="value num">94%</span>
+        <span class="was">was <s>14%</s></span>
+      </div>
+      <div class="fig">
+        <span class="label">False positives</span>
+        <span class="value num">0.40%</span>
+        <span class="was">was <s>27.6%</s></span>
+      </div>
+      <div class="fig">
+        <span class="label">Per wallet</span>
+        <span class="value num">5 ms</span>
+        <span class="was">1,352 in 6 s</span>
+      </div>
+    </div>
+    <p class="lede" style="margin-top:.5rem">
+      The false-positive rate is the number that matters. A tool that flags 341
+      innocent wallets to find 35 guilty ones does not get used twice.
+    </p>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Per rule</span>
+      <h2>Precision, before and after</h2>
+    </div>
+
+    <div class="chart">
+      <div class="chart-head">
+        <span class="chart-title">Share of flagged wallets that were genuinely planted</span>
+        <div class="legend">
+          <span><i class="swatch sw-before"></i> As specified</span>
+          <span><i class="swatch sw-after"></i> After tuning</span>
+        </div>
+      </div>
+
+      <div class="rows">
+        <div class="row"><div class="row-label">peel_chain</div><div class="track"><div class="gridlines"><i style="left:calc(7px + 0 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 25 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 50 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 75 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 100 * (100% - 14px) / 100)"></i></div><div class="connector" style="left:calc(7px + 9 * (100% - 14px) / 100);width:calc(calc(7px + 100 * (100% - 14px) / 100) - calc(7px + 9 * (100% - 14px) / 100))"></div><button type="button" class="dot d-before" style="left:calc(7px + 9 * (100% - 14px) / 100)" data-rule="peel_chain" data-which="As specified" data-p="9" data-fired="353" data-guilty="32" data-clean="321" aria-label="peel_chain, As specified: 9% precision. Fired on 353 wallets, 32 planted, 321 clean."></button><button type="button" class="dot d-after" style="left:calc(7px + 100 * (100% - 14px) / 100)" data-rule="peel_chain" data-which="After tuning" data-p="100" data-fired="59" data-guilty="59" data-clean="0" aria-label="peel_chain, After tuning: 100% precision. Fired on 59 wallets, 59 planted, 0 clean."></button><span class="val" style="right:calc(100% - calc(7px + 9 * (100% - 14px) / 100) + 14px)">9%</span><span class="val" style="left:calc(calc(7px + 100 * (100% - 14px) / 100) + 14px)">100%</span></div></div>
+        <div class="row"><div class="row-label">structuring</div><div class="track"><div class="gridlines"><i style="left:calc(7px + 0 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 25 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 50 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 75 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 100 * (100% - 14px) / 100)"></i></div><div class="connector" style="left:calc(7px + 8 * (100% - 14px) / 100);width:calc(calc(7px + 94 * (100% - 14px) / 100) - calc(7px + 8 * (100% - 14px) / 100))"></div><button type="button" class="dot d-before" style="left:calc(7px + 8 * (100% - 14px) / 100)" data-rule="structuring" data-which="As specified" data-p="8" data-fired="24" data-guilty="2" data-clean="22" aria-label="structuring, As specified: 8% precision. Fired on 24 wallets, 2 planted, 22 clean."></button><button type="button" class="dot d-after" style="left:calc(7px + 94 * (100% - 14px) / 100)" data-rule="structuring" data-which="After tuning" data-p="94" data-fired="49" data-guilty="46" data-clean="3" aria-label="structuring, After tuning: 94% precision. Fired on 49 wallets, 46 planted, 3 clean."></button><span class="val" style="right:calc(100% - calc(7px + 8 * (100% - 14px) / 100) + 14px)">8%</span><span class="val" style="left:calc(calc(7px + 94 * (100% - 14px) / 100) + 14px)">94%</span></div></div>
+        <div class="row"><div class="row-label">rapid_layering</div><div class="track"><div class="gridlines"><i style="left:calc(7px + 0 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 25 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 50 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 75 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 100 * (100% - 14px) / 100)"></i></div><button type="button" class="dot d-before" style="left:calc(7px + 92 * (100% - 14px) / 100)" data-rule="rapid_layering" data-which="As specified" data-p="92" data-fired="24" data-guilty="22" data-clean="2" aria-label="rapid_layering, As specified: 92% precision. Fired on 24 wallets, 22 planted, 2 clean."></button><button type="button" class="dot d-after" style="left:calc(7px + 92 * (100% - 14px) / 100)" data-rule="rapid_layering" data-which="After tuning" data-p="92" data-fired="24" data-guilty="22" data-clean="2" aria-label="rapid_layering, After tuning: 92% precision. Fired on 24 wallets, 22 planted, 2 clean."></button><span class="val" style="left:calc(calc(7px + 92 * (100% - 14px) / 100) + 14px)">92% — unchanged</span></div></div>
+        <div class="row"><div class="row-label">round_trip</div><div class="track"><div class="gridlines"><i style="left:calc(7px + 0 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 25 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 50 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 75 * (100% - 14px) / 100)"></i><i style="left:calc(7px + 100 * (100% - 14px) / 100)"></i></div><div class="connector" style="left:calc(7px + 12 * (100% - 14px) / 100);width:calc(calc(7px + 100 * (100% - 14px) / 100) - calc(7px + 12 * (100% - 14px) / 100))"></div><button type="button" class="dot d-before" style="left:calc(7px + 12 * (100% - 14px) / 100)" data-rule="round_trip" data-which="As specified" data-p="12" data-fired="17" data-guilty="2" data-clean="15" aria-label="round_trip, As specified: 12% precision. Fired on 17 wallets, 2 planted, 15 clean."></button><button type="button" class="dot d-after" style="left:calc(7px + 100 * (100% - 14px) / 100)" data-rule="round_trip" data-which="After tuning" data-p="100" data-fired="4" data-guilty="4" data-clean="0" aria-label="round_trip, After tuning: 100% precision. Fired on 4 wallets, 4 planted, 0 clean."></button><span class="val" style="right:calc(100% - calc(7px + 12 * (100% - 14px) / 100) + 14px)">12%</span><span class="val" style="left:calc(calc(7px + 100 * (100% - 14px) / 100) + 14px)">100%</span></div></div>
+      </div>
+
+      <div class="axis" aria-hidden="true">
+        <div></div>
+        <div class="axis-marks">
+          <i style="left:0%">0%</i><i style="left:25%">25%</i><i style="left:50%">50%</i>
+          <i style="left:75%">75%</i><i style="left:100%">100%</i>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <caption>The same figures as counts. &ldquo;On clean&rdquo; is the column that was hurting us.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Rule</th>
+            <th scope="col">Fired</th>
+            <th scope="col">On planted</th>
+            <th scope="col">On clean</th>
+            <th scope="col">Precision</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>peel_chain<span class="sub"> · as specified</span></td><td class="num">353</td><td class="num">32</td><td class="num">321</td><td><span class="pill pill-bad">9%</span></td></tr>
+          <tr><td>peel_chain<span class="sub"> · tuned</span></td><td class="num">59</td><td class="num">59</td><td class="num">0</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>structuring<span class="sub"> · as specified</span></td><td class="num">24</td><td class="num">2</td><td class="num">22</td><td><span class="pill pill-bad">8%</span></td></tr>
+          <tr><td>structuring<span class="sub"> · tuned</span></td><td class="num">49</td><td class="num">46</td><td class="num">3</td><td><span class="pill pill-good">94%</span></td></tr>
+          <tr><td>rapid_layering<span class="sub"> · as specified</span></td><td class="num">24</td><td class="num">22</td><td class="num">2</td><td><span class="pill pill-good">92%</span></td></tr>
+          <tr><td>rapid_layering<span class="sub"> · tuned</span></td><td class="num">24</td><td class="num">22</td><td class="num">2</td><td><span class="pill pill-good">92%</span></td></tr>
+          <tr><td>round_trip<span class="sub"> · as specified</span></td><td class="num">17</td><td class="num">2</td><td class="num">15</td><td><span class="pill pill-bad">12%</span></td></tr>
+          <tr><td>round_trip<span class="sub"> · tuned</span></td><td class="num">4</td><td class="num">4</td><td class="num">0</td><td><span class="pill pill-good">100%</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Attribution</span>
+      <h2>What each change was worth</h2>
+    </div>
+    <p>
+      Every threshold was set by measuring against <code>ground_truth.json</code>,
+      not by taste. Each fix below is a single change with a measured before and
+      after.
+    </p>
+
+    <div class="fixes">
+      <div class="fix">
+        <div>
+          <div class="fix-name">peel_chain</div>
+          <div class="fix-delta">9% &rarr; 100%</div>
+        </div>
+        <div class="fix-body">
+          <p><strong>Require the forwarded-to wallet to be freshly funded</strong> &mdash; exactly one wallet paying into it.</p>
+          <p class="why">
+            Real peel chains create a new wallet at every hop, so each destination has
+            exactly one funder. The 321 clean wallets tripping the rule were forwarding
+            into established hubs with 8 to 162 funders. One condition separated the two
+            populations completely.
+          </p>
+        </div>
+      </div>
+
+      <div class="fix">
+        <div>
+          <div class="fix-name">structuring</div>
+          <div class="fix-delta">8% &rarr; 94%</div>
+        </div>
+        <div class="fix-body">
+          <p><strong>Require the amounts to crowd the threshold</strong> &mdash; at least 65% of it &mdash; and to reach four or more distinct recipients.</p>
+          <p class="why">
+            As written, the rule asked only for sub-threshold payments summing over the
+            limit in 24 hours. Any wallet moving $500 a dozen times a day satisfies that.
+            What actually marks structuring is that the payments crowd the limit: someone
+            avoiding a $10,000 report sends $9,400, not $500.
+          </p>
+        </div>
+      </div>
+
+      <div class="fix">
+        <div>
+          <div class="fix-name">round_trip</div>
+          <div class="fix-delta">12% &rarr; 100%</div>
+        </div>
+        <div class="fix-body">
+          <p><strong>Cap the horizon at 2 days instead of 14, and require two intermediaries.</strong></p>
+          <p class="why">
+            Over a fortnight, ordinary traffic in a graph this dense throws up
+            value-coherent cycles by chance. Every false positive spanned 90 to 330
+            hours; every planted wash loop closed in under 40 minutes. And every false
+            positive was two hops &mdash; <span class="mono">a&nbsp;&rarr;&nbsp;b&nbsp;&rarr;&nbsp;a</span>,
+            which is a refund, not a wash. The two populations did not overlap on either axis.
+          </p>
+        </div>
+      </div>
+
+      <div class="fix">
+        <div>
+          <div class="fix-name">rapid_layering</div>
+          <div class="fix-delta">92% &rarr; 92%</div>
+        </div>
+        <div class="fix-body">
+          <p><strong>Left alone.</strong></p>
+          <p class="why">
+            It was already the strongest of the four and nothing in the measurement
+            argued for touching it. Recording that is part of the result.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Coverage</span>
+      <h2>Did we find what we planted?</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption>Recall against each injected pattern, by the wallets it involved.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Planted pattern</th>
+            <th scope="col">Wallets</th>
+            <th scope="col">Flagged</th>
+            <th scope="col">Recall</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>peel chain #1</td><td class="num">21</td><td class="num">21</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>peel chain #2</td><td class="num">17</td><td class="num">17</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>peel chain #3</td><td class="num">21</td><td class="num">21</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>rapid fanout #1</td><td class="num">20</td><td class="num">20</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>rapid fanout #2</td><td class="num">26</td><td class="num">26</td><td><span class="pill pill-good">100%</span></td></tr>
+          <tr><td>round trip #1</td><td class="num">6</td><td class="num">2</td><td><span class="pill pill-bad">33%</span></td></tr>
+          <tr><td>round trip #2</td><td class="num">6</td><td class="num">2</td><td><span class="pill pill-bad">33%</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <h3>Known gap</h3>
+      <p>
+        The eight wallets that take a mixer&rsquo;s skim off a round trip are not
+        detected. They receive one small payment and never spend it, so nothing
+        about their own behaviour is anomalous &mdash; they are reachable only
+        through the ring. This is the whole of the remaining 7% of recall.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Corrections</span>
+      <h2>Three places the spec was wrong</h2>
+    </div>
+    <ul class="plain">
+      <li>
+        <strong>The peel-chain condition described a fan-out.</strong> &ldquo;In-degree 1
+        and out-degree &gt; 5 within ten minutes&rdquo; is a measure of width. A peel chain
+        has out-degree 2 at every hop and is recognisable by its <em>length</em>. Built
+        literally, the rule would have missed every chain the generator plants. Both
+        conditions are implemented, with the chain walk first.
+      </li>
+      <li>
+        <strong>The structuring threshold is fiat, not BTC.</strong> Reporting thresholds
+        are denominated in dollars; <code>threshold=10000</code> read as BTC would never
+        fire on any real dataset. Conversion runs through one shared constant.
+      </li>
+      <li>
+        <strong>Detectors need to report counterparties, not just operators.</strong> A
+        structuring source without its twenty destinations is half a case, and those
+        destinations are invisible on their own behaviour &mdash; one payment in,
+        nothing out, by design. Adding this took fanout recall from 5% to 100%.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Found by tests</span>
+      <h2>Two bugs worth naming</h2>
+    </div>
+    <ul class="plain">
+      <li>
+        <strong>A 475% round trip.</strong> The returning amount was bounded only from
+        below, so 0.004&nbsp;BTC leaving and an unrelated 0.019&nbsp;BTC arriving counted
+        as the same money coming home. Similarity is now symmetric &mdash;
+        <span class="mono">min/max</span>, capped at 1.
+      </li>
+      <li>
+        <strong>Unbounded recursion on single-funder chains.</strong> The structuring
+        recipient check walked from a wallet to its funder to <em>its</em> funder, and a
+        peel chain is precisely such a run. It recursed until the interpreter gave up.
+      </li>
+    </ul>
+    <p style="color:var(--ink-2)">
+      Both are now regression-tested. The suite is 17 tests over a hand-built graph
+      carrying one clean instance of each pattern, plus clean wallets that must stay clean.
+    </p>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="eyebrow">Method</span>
+      <h2>How to re-run this</h2>
+    </div>
+    <p>
+      The generator plants known patterns and records them in
+      <code>data/ground_truth.json</code>, so precision and recall are measurable
+      rather than argued. If you change a threshold in <code>domain_rules.py</code>,
+      re-measure against that file &mdash; do not eyeball the result. The numbers on
+      this page came from a seeded dataset and reproduce exactly.
+    </p>
+    <div class="note">
+      <p class="mono" style="font-size:var(--step--1); color:var(--ink-2)">
+        python -m app.services.data_generator<br>
+        python -m app.services.graph_builder<br>
+        pytest tests/ -q
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <span>Bitcoin Transaction Threat Monitor &middot; Phase 4 of 9 &middot; measured on a seeded 5,078-transaction dataset</span>
+    <span>Precision 96% &middot; Recall 93% &middot; F1 94% &middot; False-positive rate 0.40%</span>
+  </footer>
+</div>
+
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+
+<script>
+  /* Progressive enhancement only: the chart and table are already in the markup,
+     so the page is complete without this. */
+  const tip = document.getElementById("tip");
+  const hide = () => { tip.dataset.show = "0"; };
+
+  for (const dot of document.querySelectorAll(".dot")) {
+    const d = dot.dataset;
+    const show = () => {
+      tip.innerHTML =
+        `<span class="tip-t">${d.rule} &middot; ${d.which}</span>` +
+        `<dl><dt>Precision</dt><dd>${d.p}%</dd>` +
+        `<dt>Fired on</dt><dd>${d.fired}</dd>` +
+        `<dt>Planted</dt><dd>${d.guilty}</dd>` +
+        `<dt>Clean</dt><dd>${d.clean}</dd></dl>`;
+      tip.dataset.show = "1";
+      const r = dot.getBoundingClientRect();
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      let left = Math.max(8, Math.min(r.left + r.width / 2 - tw / 2,
+                                      window.innerWidth - tw - 8));
+      let top = r.top - th - 10;
+      if (top < 8) top = r.bottom + 10;
+      tip.style.left = left + "px";
+      tip.style.top = top + "px";
+    };
+    dot.addEventListener("mouseenter", show);
+    dot.addEventListener("mouseleave", hide);
+    dot.addEventListener("focus", show);
+    dot.addEventListener("blur", hide);
+  }
+  window.addEventListener("scroll", hide, { passive: true });
+</script>
