@@ -1,71 +1,74 @@
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
+@import 'tailwindcss';
 
-/* The palette is a dark forensic console: the graph is the centrepiece, so the
-   ground stays quiet and saturated colour is reserved for risk. Hues match the
-   Phase 4 tuning report so the two artefacts read as one system. */
-@theme {
-  --color-ground: #0f1319;
-  --color-surface: #171d26;
-  --color-surface-2: #1e2530;
-  --color-edge: #2a333f;
-  --color-edge-strong: #3b4553;
+:root {
+  /* Surface scale — dark charcoal, not pure black */
+  --bg:   #0f1114;
+  --p1:   #171a1f;
+  --p2:   #1d2128;
+  --p3:   #252b34;
 
-  --color-ink: #e7ebf1;
-  --color-ink-2: #a2acbb;
-  --color-ink-3: #6f7a89;
+  /* Borders */
+  --bd:   #262d38;
+  --bd2:  #323b47;
 
-  --color-accent: #4e92d4;
-  --color-accent-dim: #1b2c3f;
+  /* Text */
+  --t0:   #dde7f2;
+  --t1:   #a8b8ca;
+  --t2:   #6a7f96;
+  --t3:   #3f5162;
 
-  /* Risk ramp: green through amber to red, all legible on the dark ground. */
-  --color-risk-low: #3f9e6e;
-  --color-risk-medium: #d9a441;
-  --color-risk-high: #de7a3c;
-  --color-risk-critical: #de5342;
+  /* Risk accent — one hue family, four steps */
+  --rc:   #c9512a;   /* CRITICAL — muted burnt orange  */
+  --rh:   #b87c22;   /* HIGH    — dark amber           */
+  --rm:   #6e8faa;   /* MEDIUM  — steel blue           */
+  --rl:   #3e7a60;   /* LOW     — muted teal           */
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --rc-bg: rgba(201,81,42,0.10);
+  --rh-bg: rgba(184,124,34,0.10);
+  --rm-bg: rgba(110,143,170,0.10);
+  --rl-bg: rgba(62,122,96,0.10);
+
+  --sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --mono: 'DM Mono', 'Menlo', monospace;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
+html, body, #root { height: 100%; overflow: hidden; }
+* { box-sizing: border-box; }
 
-body {
-  margin: 0;
-  background: var(--color-ground);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--t2); }
 
-/* Scrollbars that do not fight the dark ground. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-edge-strong) transparent;
-}
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--color-edge-strong);
-  border-radius: 6px;
-  border: 3px solid var(--color-ground);
-}
+::selection { background: rgba(201,81,42,0.22); color: var(--t0); }
+button { font-family: var(--sans); cursor: pointer; }
+a     { color: inherit; }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+/* Trail hop animation */
+@keyframes hop-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+.hop-in  { animation: hop-in 0.34s cubic-bezier(0.22,1,0.36,1) both; }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+@keyframes line-grow {
+  from { transform: scaleY(0); transform-origin: top; }
+  to   { transform: scaleY(1); transform-origin: top; }
 }
+.line-grow { animation: line-grow 0.38s cubic-bezier(0.22,1,0.36,1) both; }
+
+/* Panel slide-in */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.slide-right { animation: slide-in-right 0.28s cubic-bezier(0.22,1,0.36,1) both; }
+
+/* Overlay fade */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fade-in 0.18s ease both; }
