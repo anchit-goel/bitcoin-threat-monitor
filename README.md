@@ -158,7 +158,7 @@ succeeding on a machine that happens to be online.
 | 0 | Project scaffold + schema lock | Backend B | **done** |
 | 1 | Synthetic data generator | Backend A | **done** |
 | 2 | Ingestion parser + graph builder | Backend A | **done** |
-| 3 | ML baseline on the Elliptic dataset | AI/ML | **code done** — needs the real CSVs for quotable numbers |
+| 3 | ML baseline on the Elliptic dataset | AI/ML | **done on real data** — see the accuracy warning above |
 | 4 | Domain rule detectors | Cybersecurity | **done** |
 | 5 | Graph features + scoring + explainability | AI/ML | **done** |
 | 6 | API layer | Backend B | **done** |
@@ -299,6 +299,60 @@ git add public/demo-data && git commit -m "Refresh demo snapshot"
 Pushing to `main` builds and deploys via `.github/workflows/pages.yml`. The
 workflow fails early if `public/demo-data` is empty, rather than publishing a
 broken site.
+
+## Read this before quoting any accuracy number
+
+There are two sets of figures in this repository and they say very different
+things.
+
+**On synthetic data we score 96-99%.** Those numbers are real, reproducible and
+measured on a held-out seed — but the patterns being detected were planted by
+`data_generator.py`, and the generator and the detectors were written against
+the same idea of what a peel chain looks like. They answer "do we detect what we
+drew?", not "does this work on real crime".
+
+**On real data our structural features are close to useless.**
+`python -m app.services.elliptic_real` trains on the Elliptic Data Set — 203,769
+real Bitcoin transactions, 4,545 labelled illicit by Elliptic's own analysts —
+using the six features from `feature_extraction.py` that an edge list supports.
+Held out by connected component so no edge crosses the split:
+
+| Measure | Result |
+| --- | --- |
+| ROC AUC (random forest) | **0.685** |
+| Every feature individually | 0.387 – 0.498 (a coin flip is 0.500) |
+| Precision@50 | **8.0% — 0.72x, worse than picking at random** |
+| Precision@500 | 19.6% (1.75x over an 11.2% base rate) |
+| Isolation forest ROC AUC | **0.358 — worse than chance** |
+
+Two things follow, and both matter for the write-up.
+
+Illicit transactions turn out to be *less* connected than licit ones, which is
+why an anomaly detector fitted on licit data ranks them as more normal. The
+isolation forest is not weak here, it is actively pointing the wrong way.
+
+And at the sharp end of the queue — the top 50, which is what an analyst
+actually reviews — the ranking is no better than chance. Modest lift only
+appears 500 alerts deep.
+
+**What this does and does not condemn.** It tests the structural half of the
+feature set. The amount and timing features (velocity, totals, variance) could
+not be tested, because Elliptic's edge list carries no values and the file that
+does is 200 MB and truncates on every mirror reachable here. Those are precisely
+the features most likely to hold the signal, and they remain unvalidated.
+
+So: quote the synthetic numbers as *"detects the laundering patterns we
+model"*, not as accuracy against real-world crime. The honest headline is that
+topology alone does not separate real illicit Bitcoin activity, and that finding
+came out of building the benchmark rather than assuming the synthetic score
+generalised.
+
+```bash
+python -m app.services.elliptic_real
+```
+
+See `data/README.md` for the two files it needs and how to verify they are
+genuine.
 
 ## Detector accuracy
 
