@@ -47,11 +47,34 @@ experiment is a head-to-head: our six structural features against Elliptic's
 166, on the same split. That measures exactly how much signal our feature
 engineering is missing.
 
-### BitcoinHeist
+### BitcoinHeist — real, address-level, and downloaded
 
-The UCI BitcoinHeist ransomware dataset (real addresses, real ransomware
-family labels) was also attempted. Its 111 MB archive truncates on every
-download from `archive.ics.uci.edu` here, and the server supports neither
-range requests nor resume, so it could not be used. Worth retrying on a
-machine with a better connection — it is address-level, which matches our
-wallet-scoring frame more closely than Elliptic's transaction-level data.
+Real Bitcoin addresses with real ransomware-family labels: 2,916,697 rows,
+905,983 unique addresses, 2011-2018, 41,413 labelled to one of 28 ransomware
+families (CryptoLocker, Locky, Cerber, WannaCry and others) and the rest
+`white` (not implicated). This is address-level, so it matches our
+wallet-scoring frame more directly than Elliptic's transaction-level data.
+
+UCI's own host (`archive.ics.uci.edu`) truncates the 111 MB archive on every
+attempt here and supports neither range requests nor resume. The working
+source is a GitHub-hosted copy of the same published dataset, which does
+support range requests:
+
+```bash
+curl -L -o data/BitcoinHeistData.csv   https://media.githubusercontent.com/media/vibhorag101/Bitcoin-Ransomware-Classifier/main/BitcoinHeistData.csv
+```
+
+Verify before trusting it — a partial download reads fine in pandas and will
+not obviously fail:
+
+| Check | Expected |
+| --- | --- |
+| File size | 235,882,597 bytes exactly |
+| Row count | 2,916,697 |
+| `white` label count | 2,875,284 |
+| Non-white (ransomware) count | 41,413 |
+
+Columns: `address, year, day, length, weight, count, looped, neighbors, income, label`.
+`length`, `weight`, `count`, `looped`, `neighbors` are the paper's own
+topological features per address — not the same as our graph features, and
+worth comparing against them rather than reusing blindly.
