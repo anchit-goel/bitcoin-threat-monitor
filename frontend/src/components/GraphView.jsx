@@ -15,6 +15,20 @@ const RISK_FILTERS = [
 const DEFAULT_MIN_RISK = 0.3;
 const NODE_LIMIT = 700;
 
+// The smallest a node's clickable radius may get, in CSS pixels.
+//
+// This is the whole reason clicking used to fail. The hit area was derived
+// from the node's drawn radius in *graph* units, and at the default zoom the
+// graph is scaled to about 0.18 - so a wallet ended up with a hit radius of
+// roughly one pixel. It was not that the nodes were small and fiddly; the
+// target was smaller than the cursor's own hotspot, and on a narrower window
+// it went sub-pixel and nothing was clickable at all. Dragging failed for the
+// same reason, since it uses the same hit test.
+//
+// The pointer area is therefore sized in screen space and converted back into
+// graph units, so it stays a comfortable target at every zoom level.
+const MIN_HIT_RADIUS_PX = 9;
+
 const prefersReducedMotion = () =>
   typeof window !== "undefined" &&
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -30,7 +44,19 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
   const [showIps, setShowIps] = useState(true);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [hovered, setHovered] = useState(null);
+  const [hoverClickable, setHoverClickable] = useState(false);
   const fitted = useRef(false);
+
+  // The canvas painter reads these instead of closing over state.
+  //
+  // nodeCanvasObject is a prop: giving react-force-graph a new function
+  // identity makes it reconfigure. The pulse used to live in state and tick
+  // fourteen times a second, so the whole component - toolbar, legend and all -
+  // re-rendered at 14 Hz and the graph was reconfigured just as often. That is
+  // pure overhead on a fast machine and visible jank on a slow one.
+  const selectedRef = useRef(selected);
+  const hoveredRef = useRef(hovered);
+  const pulseRef = useRef(0);
 
   // --- data -------------------------------------------------------------
   useEffect(() => {
@@ -88,18 +114,38 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
     return () => observer.disconnect();
   }, []);
 
+  // Selection and hover only need to reach the painter, not trigger a render.
+  // The canvas is repainted explicitly instead.
+  useEffect(() => {
+    selectedRef.current = selected;
+    fgRef.current?.refresh?.();
+  }, [selected]);
+
+  useEffect(() => {
+    hoveredRef.current = hovered;
+    fgRef.current?.refresh?.();
+  }, [hovered]);
+
   // --- the pulse --------------------------------------------------------
   // The simulation stops repainting once it cools, so a pulse drawn from the
-  // clock needs the canvas nudged. Only runs while urgent nodes are on screen,
-  // and not at all when the viewer has asked for reduced motion.
-  const [pulse, setPulse] = useState(0);
+  // clock needs the canvas nudged. Driven by requestAnimationFrame rather than
+  // setInterval: it writes to a ref instead of state, so nothing re-renders,
+  // and the browser suspends it while the tab is hidden. Only runs while
+  // urgent nodes are on screen, and not at all under reduced motion.
   useEffect(() => {
     if (!urgentCount || prefersReducedMotion()) return undefined;
-    const id = setInterval(() => {
-      setPulse((p) => p + 1);
-      fgRef.current?.refresh?.();
-    }, 70);
-    return () => clearInterval(id);
+    let frame;
+    let last = 0;
+    const tick = (time) => {
+      if (time - last > 80) {
+        last = time;
+        pulseRef.current = time / 1000;
+        fgRef.current?.refresh?.();
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [urgentCount]);
 
   // --- drawing ----------------------------------------------------------
@@ -107,8 +153,8 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
     (node, ctx, globalScale) => {
       const isIp = node.type === "ip";
       const risk = node.risk_score;
-      const isSelected = node.id === selected;
-      const isHovered = node.id === hovered;
+      const isSelected = node.id === selectedRef.current;
+      const isHovered = node.id === hoveredRef.current;
 
       // Wallets grow with risk so the eye lands on them first; IP nodes stay a
       // fixed size because they carry no score of their own.
@@ -118,7 +164,7 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
       if (URGENT.has(node.severity)) {
         const phase = prefersReducedMotion()
           ? 0.5
-          : (Math.sin(pulse / 4.5) + 1) / 2;
+          : (Math.sin(pulseRef.current * 2.2) + 1) / 2;
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 2.5 + phase * 3, 0, 2 * Math.PI);
         ctx.strokeStyle = color;
@@ -156,14 +202,27 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
         );
       }
     },
-    [selected, hovered, pulse],
+    // No dependencies on purpose: a stable painter means the graph is never
+    // reconfigured mid-interaction. Everything it needs comes from refs.
+    [],
   );
 
-  const paintPointerArea = useCallback((node, color, ctx) => {
-    const radius = (node.type === "ip" ? 2.6 : 3 + (node.risk_score ?? 0) * 3.4) + 2;
+  const paintPointerArea = useCallback((node, color, ctx, globalScale) => {
+    const isIp = node.type === "ip";
+    const drawn = isIp ? 2.6 : 3 + (node.risk_score ?? 0) * 3.4;
+    // globalScale converts graph units to screen pixels, so dividing by it
+    // turns a pixel floor back into the graph units this canvas is drawn in.
+    // Without it the target shrinks with the zoom until it is unclickable.
+    //
+    // IP nodes get a smaller floor deliberately. They are draggable but not
+    // clickable, and giving them the same generous target would let them
+    // intercept clicks meant for the wallets sitting next to them.
+    const floorPx = isIp ? MIN_HIT_RADIUS_PX * 0.5 : MIN_HIT_RADIUS_PX;
+    const radius = Math.max(drawn + 2, floorPx / (globalScale || 1));
+
     ctx.fillStyle = color;
     ctx.beginPath();
-    if (node.type === "ip") {
+    if (isIp) {
       ctx.rect(node.x - radius, node.y - radius, radius * 2, radius * 2);
     } else {
       ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
@@ -187,7 +246,12 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
         urgentCount={urgentCount}
       />
 
-      <div ref={wrapRef} className="relative flex-1 overflow-hidden bg-ground">
+      <div
+        ref={wrapRef}
+        className={`relative flex-1 overflow-hidden bg-ground ${
+          hoverClickable ? "cursor-pointer" : "cursor-grab"
+        }`}
+      >
         {loading && <Overlay><Spinner /> <span>Loading graph…</span></Overlay>}
 
         {error && (
@@ -229,7 +293,11 @@ export default function GraphView({ selected, onSelect, reloadKey }) {
             linkWidth={(l) => (l.kind === "broadcast" ? 0.3 : 0.6)}
             linkDirectionalParticles={0}
             onNodeClick={(node) => node.type !== "ip" && onSelect(node.id)}
-            onNodeHover={(node) => setHovered(node?.id ?? null)}
+            onNodeHover={(node) => {
+              setHovered(node?.id ?? null);
+              // Only wallets open the panel, so only wallets get a pointer.
+              setHoverClickable(Boolean(node) && node.type !== "ip");
+            }}
             cooldownTicks={120}
             d3VelocityDecay={0.32}
             onEngineStop={() => {
