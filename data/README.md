@@ -35,8 +35,10 @@ re-checks them on load and refuses to run on anything else.
 
 ### The third file
 
-`elliptic_txs_features.csv` holds 166 anonymised columns and is roughly 200 MB.
-Every mirror reachable from here truncates it partway, so it is **not used**.
+`elliptic_txs_features.csv` holds 166 anonymised columns and is **658 MB** (not
+the ~200 MB usually quoted — that is the figure for a compressed copy). Every
+mirror reachable from here truncates it partway; the best run reached 83 MB of
+658 at roughly 92 KB/s, so it is **not used**.
 It is also the file that carries the time-step column, which is why the
 benchmark uses a component-grouped split rather than the paper's temporal one.
 

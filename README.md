@@ -338,7 +338,7 @@ appears 500 alerts deep.
 **What this does and does not condemn.** It tests the structural half of the
 feature set. The amount and timing features (velocity, totals, variance) could
 not be tested, because Elliptic's edge list carries no values and the file that
-does is 200 MB and truncates on every mirror reachable here. Those are precisely
+does is 658 MB and truncates on every mirror reachable here. Those are precisely
 the features most likely to hold the signal, and they remain unvalidated.
 
 So: quote the synthetic numbers as *"detects the laundering patterns we
