@@ -274,6 +274,32 @@ python -m app.services.wallet_model
 
 Trains and saves the wallet-space models. Run it before starting the API.
 
+## Live demo
+
+A published demo runs on GitHub Pages. It is the real frontend against a
+**frozen snapshot** of real API responses — Pages serves static files and
+cannot run FastAPI, so deploying the frontend alone would publish an app that
+loads and then reports the API unreachable.
+
+Everything read-only behaves exactly as it does against the live server; the
+graph filters and the wallet neighbourhoods are recomputed client-side and
+produce identical node and link counts. What the demo cannot do is ingest a
+new file, because that needs the pipeline. The header says so instead of
+offering a button that fails.
+
+To refresh the snapshot after changing the data or the models:
+
+```bash
+# with the backend running and a dataset ingested
+cd frontend
+npm run snapshot        # writes public/demo-data/
+git add public/demo-data && git commit -m "Refresh demo snapshot"
+```
+
+Pushing to `main` builds and deploys via `.github/workflows/pages.yml`. The
+workflow fails early if `public/demo-data` is empty, rather than publishing a
+broken site.
+
 ## Detector accuracy
 
 Measured on the 1,352-wallet demo graph against `ground_truth.json`:

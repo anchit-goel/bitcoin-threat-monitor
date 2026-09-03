@@ -7,7 +7,17 @@
  * failed" would throw away the one piece of information the user needs.
  */
 
+import * as staticApi from "./staticApi";
+
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+/**
+ * The published GitHub Pages build has no backend to talk to, so it reads a
+ * frozen snapshot instead. Everything read-only behaves identically; the UI
+ * checks this flag to hide the upload button rather than offer one that
+ * cannot work.
+ */
+export const IS_STATIC = import.meta.env.VITE_STATIC_DEMO === "true";
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -60,22 +70,42 @@ const qs = (params) => {
   return encoded ? `?${encoded}` : "";
 };
 
-export const getHealth = () => request("/health");
+export const getHealth = () =>
+  IS_STATIC ? staticApi.getHealth() : request("/health");
 
-export const getAlerts = ({ minSeverity, limit = 500 } = {}) =>
-  request(`/alerts${qs({ min_severity: minSeverity, limit })}`);
+export const getAlerts = (options = {}) =>
+  IS_STATIC
+    ? staticApi.getAlerts(options)
+    : request(
+        `/alerts${qs({ min_severity: options.minSeverity, limit: options.limit ?? 500 })}`,
+      );
 
-export const getWallet = (address, { hops = 2, limit = 300 } = {}) =>
-  request(`/wallet/${encodeURIComponent(address)}${qs({ hops, limit })}`);
+export const getWallet = (address, options = {}) =>
+  IS_STATIC
+    ? staticApi.getWallet(address, options)
+    : request(
+        `/wallet/${encodeURIComponent(address)}${qs({
+          hops: options.hops ?? 2,
+          limit: options.limit ?? 300,
+        })}`,
+      );
 
-export const getGraph = ({ minRisk = 0, limit = 600, includeIps = true } = {}) =>
-  request(
-    `/graph${qs({ min_risk: minRisk, limit, include_ips: includeIps })}`,
-  );
+export const getGraph = (options = {}) =>
+  IS_STATIC
+    ? staticApi.getGraph(options)
+    : request(
+        `/graph${qs({
+          min_risk: options.minRisk ?? 0,
+          limit: options.limit ?? 600,
+          include_ips: options.includeIps ?? true,
+        })}`,
+      );
 
-export const clearGraph = () => request("/graph", { method: "DELETE" });
+export const clearGraph = () =>
+  IS_STATIC ? staticApi.clearGraph() : request("/graph", { method: "DELETE" });
 
 export function ingest(file) {
+  if (IS_STATIC) return staticApi.ingest();
   const body = new FormData();
   body.append("file", file);
   return request("/ingest", { method: "POST", body });

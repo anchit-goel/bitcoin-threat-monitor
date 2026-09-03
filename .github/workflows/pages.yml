@@ -1,0 +1,74 @@
+name: Deploy demo to GitHub Pages
+
+# The published site is the frontend plus a frozen snapshot of the API, since
+# Pages serves static files and cannot run FastAPI. Regenerate the snapshot
+# with `npm run snapshot` against a running backend and commit the result;
+# this workflow only builds and publishes what is already in the repo.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it midway, so the live
+# site is never left half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Fail early if the demo snapshot is missing
+        run: |
+          if [ ! -f public/demo-data/alerts.json ]; then
+            echo "::error::public/demo-data is empty. Run 'npm run snapshot' against a"
+            echo "::error::running backend and commit the result, or the published site"
+            echo "::error::will load and then report the API unreachable."
+            exit 1
+          fi
+
+      - name: Build
+        env:
+          # Project sites live at /<repo>/, so assets resolve from there.
+          BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_STATIC_DEMO: "true"
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

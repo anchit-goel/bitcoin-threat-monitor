@@ -76,14 +76,22 @@ export default function Dashboard({ health, selected, onSelect, reloadKey }) {
       : counts.low;
   const pageMayBeTruncated = alerts.length > 0 && counts.low === 0;
 
+  // The chart shows the flagged buckets only.
+  //
+  // Including "low" made the other three unreadable: at 1,224 against 9 and 5,
+  // the medium and high bars rendered zero pixels tall and only their labels
+  // were visible. A log scale would have fixed the height at the cost of
+  // misrepresenting a 130:1 ratio as a small one. The low count is stated
+  // beneath the chart instead, and the totals are already in the cards, so
+  // nothing is hidden - it is just not drawn at a scale that erases the rest.
   const chartData = useMemo(
     () =>
-      SEVERITIES.map((severity) => ({
+      SEVERITIES.filter((s) => s !== "low").map((severity) => ({
         severity: SEVERITY_META[severity].label,
         key: severity,
-        count: severity === "low" ? lowCount : counts[severity],
+        count: counts[severity],
       })),
-    [counts, lowCount],
+    [counts],
   );
 
   const rows = useMemo(() => {
@@ -116,15 +124,22 @@ export default function Dashboard({ health, selected, onSelect, reloadKey }) {
             accent={flagged > 0}
           />
           <div className="rounded-lg border border-edge bg-surface p-4">
-            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
-              Risk distribution
-              {pageMayBeTruncated && (
-                <span className="ml-2 normal-case tracking-normal text-risk-medium">
-                  showing the top {alerts.length}
-                </span>
-              )}
-            </p>
-            <div className="mt-3 h-24">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
+                Flagged by severity
+                {pageMayBeTruncated && (
+                  <span className="ml-2 normal-case tracking-normal text-risk-medium">
+                    showing the top {alerts.length}
+                  </span>
+                )}
+              </p>
+              <p className="font-mono text-[10px] text-ink-3">
+                {lowCount.toLocaleString()} low, not shown
+              </p>
+            </div>
+            {/* Taller than it needs to be for the critical bar, so the
+                single-digit buckets still resolve to a few visible pixels. */}
+            <div className="mt-3 h-32">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={chartData}

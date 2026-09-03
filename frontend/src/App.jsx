@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import GraphView from "./components/GraphView";
 import WalletPanel from "./components/WalletPanel";
-import { getHealth, ingest } from "./lib/api";
+import { IS_STATIC, getHealth, ingest } from "./lib/api";
 
 const VIEWS = [
   { id: "graph", label: "Link analysis" },
@@ -62,7 +62,7 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-4">
           <HealthPill health={health} />
-          <IngestButton onIngested={handleIngested} />
+          {IS_STATIC ? <StaticNote /> : <IngestButton onIngested={handleIngested} />}
         </div>
       </header>
 
@@ -89,6 +89,23 @@ export default function App() {
         onSelect={setSelected}
       />
     </div>
+  );
+}
+
+function StaticNote() {
+  return (
+    <span className="rounded-md border border-edge bg-surface-2 px-3 py-1.5 text-[11px] text-ink-3">
+      Static demo — a frozen snapshot.{" "}
+      <a
+        href="https://github.com/Harit117/bitcoin-threat-monitor#running-locally"
+        target="_blank"
+        rel="noreferrer"
+        className="text-accent underline decoration-accent/40 underline-offset-2"
+      >
+        Run it locally
+      </a>{" "}
+      to ingest your own data.
+    </span>
   );
 }
 

@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-09-03T08:20:40.675Z",
+  "source": "http://localhost:8000",
+  "files": [
+    {
+      "name": "health.json",
+      "path": "/health",
+      "kb": 0
+    },
+    {
+      "name": "alerts.json",
+      "path": "/alerts?limit=5000",
+      "kb": 1187
+    },
+    {
+      "name": "graph.json",
+      "path": "/graph?min_risk=0&limit=100000&include_ips=true",
+      "kb": 2923
+    }
+  ],
+  "transactions": 5078,
+  "wallets_scored": 1352
+}
