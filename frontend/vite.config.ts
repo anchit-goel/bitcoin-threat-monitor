@@ -2,8 +2,18 @@ import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 
-import siteConfiguration from './.figma/make/site.json'
+// .figma/make/site.json is generated automatically inside Figma Make's own
+// hosted environment and is (correctly) gitignored - it never exists on a
+// fresh clone or in CI. A static `import` of it here would make every build
+// outside Figma Make fail outright (confirmed: this broke every GitHub
+// Pages deploy since the frontend was rewritten). Load it defensively
+// instead, falling back to defaults everywhere else.
+const siteConfigPath = path.resolve(__dirname, '.figma/make/site.json')
+const siteConfiguration = existsSync(siteConfigPath)
+  ? JSON.parse(readFileSync(siteConfigPath, 'utf-8'))
+  : {}
 
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
