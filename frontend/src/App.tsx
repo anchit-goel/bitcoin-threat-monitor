@@ -3,10 +3,10 @@ import {
   forwardRef, Fragment, useCallback,
 } from 'react'
 import {
-  api, ACTOR_MATRIX,
+  api,
   type Actor, type ActorDetail, type WalletDetail,
   type AlertItem, type GeoFlow, type TrailHop, type Severity,
-} from './mock'
+} from './api'
 import { GoogleGeoMap } from './GoogleGeoMap'
 
 
@@ -814,15 +814,29 @@ function MoneyTrailView({
 
 // ─── Heatmap view (actor × actor intensity) ───────────────────────────────
 function HeatmapView() {
-  const [actors, setActors] = useState<Actor[]>([])
+  const [actorIds, setActorIds] = useState<string[]>([])
+  const [matrix, setMatrix] = useState<number[][]>([])
   const [hovered, setHovered] = useState<{ r: number; c: number } | null>(null)
   const CW = 64, CH = 30
 
-  useEffect(() => { api.getActors().then(setActors) }, [])
+  useEffect(() => {
+    // The matrix endpoint returns its own actor_ids array, aligned to the
+    // matrix's rows/columns - used directly as the row/column order rather
+    // than assuming a separately-fetched actor list lines up with it.
+    api.getActorMatrix().then(({ actor_ids, matrix }) => {
+      setActorIds(actor_ids)
+      setMatrix(matrix)
+    })
+  }, [])
+
+  // Real BTC amounts have no natural 0-100 ceiling the way a risk score
+  // does, so shading is scaled against the largest amount actually present
+  // rather than a fixed maximum that most flows would never approach.
+  const maxAmount = matrix.length ? Math.max(0.0001, ...matrix.flat()) : 1
 
   function cellColor(val: number): string {
     if (val === 0) return 'transparent'
-    const t = val / 100
+    const t = Math.min(1, val / maxAmount)
     const r = Math.round(40  + t * (201 - 40))
     const g = Math.round(80  + t * (81  - 80))
     const b = Math.round(100 + t * (42  - 100))
@@ -837,34 +851,37 @@ function HeatmapView() {
           Actor-to-actor transaction intensity
         </div>
         <div style={{ fontSize: '13px', color: C.t2, marginTop: '6px', maxWidth: '520px', lineHeight: 1.55 }}>
-          Cell shading indicates transaction volume between actor pairs, weighted by combined risk score.
+          Cell shading indicates real BTC volume moved between wallets in each actor pair.
         </div>
       </div>
 
+      {actorIds.length === 0 ? (
+        <div style={{ color: C.t2, fontSize: '13px', padding: '40px', textAlign: 'center' }}>Loading matrix…</div>
+      ) : (
       <div style={{ overflowX: 'auto', paddingBottom: '16px' }}>
         <div style={{ display: 'inline-block', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', padding: '20px' }}>
           {/* Column headers */}
           <div style={{ display: 'flex', marginLeft: '92px', marginBottom: '4px' }}>
-            {actors.map((a, c) => (
+            {actorIds.map((id, c) => (
               <div key={c} style={{
                 width: `${CW}px`, flexShrink: 0, textAlign: 'center',
                 fontFamily: C.mono, fontSize: '8.5px', color: C.t2,
                 paddingBottom: '6px', borderBottom: `1px solid ${C.bd}`,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 2px 6px',
               }}>
-                {a.actor_id}
+                {id}
               </div>
             ))}
           </div>
 
           {/* Rows */}
-          {actors.map((rowA, r) => (
+          {actorIds.map((rowId, r) => (
             <div key={r} style={{ display: 'flex', alignItems: 'center' }}>
               <div style={{ width: '92px', flexShrink: 0, paddingRight: '12px', textAlign: 'right', fontFamily: C.mono, fontSize: '9px', color: C.t1, whiteSpace: 'nowrap' }}>
-                {rowA.actor_id}
+                {rowId}
               </div>
-              {actors.map((_, c) => {
-                const val = r < ACTOR_MATRIX.length && c < ACTOR_MATRIX[r].length ? ACTOR_MATRIX[r][c] : 0
+              {actorIds.map((_, c) => {
+                const val = matrix[r]?.[c] ?? 0
                 const isH = hovered?.r === r && hovered?.c === c
                 const isDiag = r === c
                 return (
@@ -880,11 +897,11 @@ function HeatmapView() {
                       cursor: val > 0 && !isDiag ? 'pointer' : 'default',
                       transition: 'background 0.12s',
                     }}
-                    title={val > 0 && !isDiag ? `${rowA.actor_id} ↔ ${actors[c].actor_id}: ${val}` : undefined}
+                    title={val > 0 && !isDiag ? `${rowId} ↔ ${actorIds[c]}: ${val.toFixed(3)} BTC` : undefined}
                   >
                     {val > 0 && !isDiag && (
-                      <span style={{ fontFamily: C.mono, fontSize: '9px', color: val > 50 ? 'rgba(255,255,255,0.8)' : C.t2, fontWeight: val > 50 ? 600 : 400 }}>
-                        {val}
+                      <span style={{ fontFamily: C.mono, fontSize: '9px', color: val > maxAmount * 0.5 ? 'rgba(255,255,255,0.8)' : C.t2, fontWeight: val > maxAmount * 0.5 ? 600 : 400 }}>
+                        {val >= 10 ? val.toFixed(0) : val.toFixed(1)}
                       </span>
                     )}
                   </div>
@@ -896,22 +913,23 @@ function HeatmapView() {
           {/* Legend */}
           <div style={{ marginTop: '16px', marginLeft: '92px', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <Mono size={9} color={C.t3}>Intensity:</Mono>
-            {[0, 20, 40, 60, 80, 100].map(v => (
-              <div key={v} style={{ width: '28px', height: '12px', background: cellColor(v), border: `1px solid ${C.bd}`, borderRadius: '1px' }} />
+            {[0, 0.2, 0.4, 0.6, 0.8, 1].map(t => (
+              <div key={t} style={{ width: '28px', height: '12px', background: cellColor(t * maxAmount), border: `1px solid ${C.bd}`, borderRadius: '1px' }} />
             ))}
-            <Mono size={9} color={C.t3}>Low → High</Mono>
+            <Mono size={9} color={C.t3}>Low → High ({maxAmount.toFixed(1)} BTC max)</Mono>
           </div>
         </div>
       </div>
+      )}
 
-      {hovered && ACTOR_MATRIX[hovered.r]?.[hovered.c] > 0 && actors[hovered.r] && actors[hovered.c] && (
+      {hovered && matrix[hovered.r]?.[hovered.c] > 0 && actorIds[hovered.r] && actorIds[hovered.c] && (
         <div style={{ marginTop: '20px', padding: '14px 18px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', display: 'inline-block' }}>
           <Mono size={9} color={C.t2}>PAIR DETAIL</Mono>
           <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, margin: '6px 0 6px' }}>
-            {actors[hovered.r].actor_id} ↔ {actors[hovered.c].actor_id}
+            {actorIds[hovered.r]} ↔ {actorIds[hovered.c]}
           </div>
           <span style={{ fontFamily: C.mono, fontSize: '12px', color: C.t1 }}>
-            Intensity: <span style={{ color: C.rc }}>{ACTOR_MATRIX[hovered.r][hovered.c]}</span>
+            Volume: <span style={{ color: C.rc }}>{matrix[hovered.r][hovered.c].toFixed(4)} BTC</span>
           </span>
         </div>
       )}

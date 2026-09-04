@@ -119,6 +119,104 @@ class IngestSummary(BaseModel):
     duration_seconds: float = 0.0
 
 
+class ActorCard(BaseModel):
+    """One resolved entity (or a single unresolved high-risk wallet), sized
+    for the investigation board's grid of cards.
+
+    Scores here are 0-100 integers, not the 0-1 floats WalletAlert uses -
+    this model serves a summary card, where a whole number reads faster than
+    a decimal, and the frontend needn't rescale.
+    """
+
+    actor_id: str
+    member_wallet_ids: list[str]
+    aggregate_risk_score: int = Field(..., ge=0, le=100)
+    confidence: int = Field(..., ge=0, le=100)
+    short_summary: str
+    connected_actor_ids: list[str] = Field(default_factory=list)
+
+
+class ActorConnection(BaseModel):
+    target_actor_id: str
+    link_type: str
+    amount_btc: float
+
+
+class ActorDetail(ActorCard):
+    """An ActorCard plus why it was formed and what it connects to."""
+
+    top_reasons: list[str] = Field(default_factory=list)
+    actor_connections: list[ActorConnection] = Field(default_factory=list)
+
+
+class ContributingFeature(BaseModel):
+    name: str
+    raw: float
+    max: float
+    unit: str
+
+
+class ConnectedWalletInfo(BaseModel):
+    address: str
+    risk_score: int = Field(..., ge=0, le=100)
+    severity: str
+    relation: str
+
+
+class TrailHop(BaseModel):
+    """One hop of a wallet's real onward money trail - not illustrative,
+    walked from the actual graph."""
+
+    step: int
+    from_wallet: str
+    to_wallet: str
+    to_label: str
+    amount_btc: float
+    amount_usd: float
+    timestamp: str
+    tx_hash: str
+    to_score: int = Field(..., ge=0, le=100)
+    to_severity: str
+
+
+class WalletDossier(BaseModel):
+    """The full investigative profile of one wallet - real data throughout,
+    not the WalletAlert summary. Separate from WalletAlert/WalletDetail
+    rather than extending them, since this is a different consumer (a rich
+    dossier UI) with a different, larger shape."""
+
+    wallet_id: str
+    address: str
+    address_full: str
+    risk_score: int = Field(..., ge=0, le=100)
+    confidence: int = Field(..., ge=0, le=100)
+    severity: str
+    first_seen: str
+    last_active: str
+    tx_count: int
+    total_volume_btc: float
+    velocity_data: list[int]
+    ai_narrative: str
+    contributing_features: list[ContributingFeature]
+    connected_wallets: list[ConnectedWalletInfo]
+    trail: list[TrailHop]
+
+
+class GeoFlow(BaseModel):
+    """Aggregated value moved between two countries.
+
+    Both ends are the INFERRED country of a wallet - the majority
+    geo_country among the transactions it appears in - not a literal
+    src/dst pair, since a single transaction only records one geo_country
+    (the observing capture point), not distinct sender/receiver locations.
+    """
+
+    from_country: str
+    to_country: str
+    amount: float
+    risk_score: int = Field(..., ge=0, le=100)
+
+
 class HealthStatus(BaseModel):
     """Liveness plus enough state to tell why the dashboard might be empty."""
 

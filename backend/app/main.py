@@ -31,16 +31,24 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    ActorCard,
+    ActorDetail,
+    GeoFlow,
     GraphPayload,
     HealthStatus,
     IngestSummary,
     Severity,
     WalletAlert,
     WalletDetail,
+    WalletDossier,
 )
-from app.services import geoip, scoring, wallet_model
+from app.services import entity_api, geoip, scoring, wallet_model
 from app.services.graph_builder import graph_to_json, get_subgraph
 from app.services.ingestion import SUPPORTED_EXTENSIONS, load_transactions
+
+# Cards a grid can render legibly - the same "a UI showing everything shows
+# nothing" principle /graph already applies to nodes.
+MAX_ACTOR_CARDS = 60
 
 # Uploads are read to disk before parsing, so a runaway file would fill the
 # volume rather than merely failing a request.
@@ -69,10 +77,20 @@ class AppState:
 
     def __init__(self) -> None:
         self.graph: nx.DiGraph | None = None
+        self.transactions: list[Any] = []
         self.alerts: list[dict[str, Any]] = []
         self.alerts_by_wallet: dict[str, dict[str, Any]] = {}
         self.transaction_count = 0
         self.source_filename: str | None = None
+
+        # Entity resolution and geo-flows are computed once at ingest, same
+        # as alerts - both need the raw transactions (co-broadcast needs
+        # src_ip; geo-flow needs geo_country), which the graph does not
+        # retain per-transfer.
+        self.actors: list[ActorCard] = []
+        self.actor_details: dict[str, ActorDetail] = {}
+        self.actor_matrix: dict[str, Any] = {"actor_ids": [], "matrix": []}
+        self.geo_flows: list[GeoFlow] = []
 
         self.rf_model = None
         self.iso_model = None
@@ -82,10 +100,15 @@ class AppState:
 
     def reset_graph(self) -> None:
         self.graph = None
+        self.transactions = []
         self.alerts = []
         self.alerts_by_wallet = {}
         self.transaction_count = 0
         self.source_filename = None
+        self.actors = []
+        self.actor_details = {}
+        self.actor_matrix = {"actor_ids": [], "matrix": []}
+        self.geo_flows = []
 
 
 state = AppState()
@@ -316,11 +339,22 @@ def ingest(file: UploadFile = File(...)) -> IngestSummary:
 
         _annotate_graph(graph, alerts)
 
+        alerts_by_wallet = {a["wallet_address"]: a for a in alerts}
+        actors, actor_details, actor_matrix = entity_api.build_actors_from_transactions(
+            transactions, graph, alerts, max_cards=MAX_ACTOR_CARDS
+        )
+        geo_flows = entity_api.build_geo_flows(transactions, alerts_by_wallet)
+
         state.graph = graph
+        state.transactions = transactions
         state.alerts = alerts
-        state.alerts_by_wallet = {a["wallet_address"]: a for a in alerts}
+        state.alerts_by_wallet = alerts_by_wallet
         state.transaction_count = len(transactions)
         state.source_filename = file.filename
+        state.actors = actors
+        state.actor_details = actor_details
+        state.actor_matrix = actor_matrix
+        state.geo_flows = geo_flows
 
         return IngestSummary(
             status="processed",
@@ -442,3 +476,60 @@ def clear_graph() -> dict[str, str]:
     """Drop the loaded dataset. Useful for resetting between demo runs."""
     state.reset_graph()
     return {"status": "cleared"}
+
+
+@app.get("/entities", response_model=list[ActorCard], tags=["entities"])
+def entities() -> list[ActorCard]:
+    """Wallets resolved into probable actors, highest risk first.
+
+    Fuses common-input-ownership with co-broadcast (see entity_resolution.py)
+    - real fusion, computed at ingest, not a placeholder. Wallets neither
+    signal could link to anything, but still individually high-risk, are
+    included as single-wallet actors so nothing dangerous drops off the
+    board purely for lacking corroboration.
+    """
+    _require_graph()
+    return state.actors
+
+
+@app.get("/entities/matrix", tags=["entities"])
+def entities_matrix() -> dict[str, Any]:
+    """A real actor-by-actor BTC-amount intensity matrix, aligned to the
+    same actor order and cut GET /entities returns - built once at ingest
+    rather than requiring one fetch per actor to populate a heatmap."""
+    _require_graph()
+    return state.actor_matrix
+
+
+@app.get("/entities/{actor_id}", response_model=ActorDetail, tags=["entities"])
+def entity_detail(actor_id: str) -> ActorDetail:
+    """One actor's evidence and its links to other actors."""
+    _require_graph()
+    detail = state.actor_details.get(actor_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Unknown actor: {actor_id}")
+    return detail
+
+
+@app.get(
+    "/wallet/{wallet_address}/dossier", response_model=WalletDossier, tags=["entities"]
+)
+def wallet_dossier(wallet_address: str) -> WalletDossier:
+    """The rich investigative profile of one wallet: real velocity history,
+    real feature values, a real walked money trail - not the WalletAlert
+    summary /wallet/{address} returns."""
+    graph = _require_graph()
+    alert = _explain(wallet_address)
+    if wallet_address not in graph:
+        raise HTTPException(status_code=404, detail=f"Unknown wallet: {wallet_address}")
+    return entity_api.build_wallet_dossier(graph, wallet_address, alert, state.manifest)
+
+
+@app.get("/geo-flows", response_model=list[GeoFlow], tags=["entities"])
+def geo_flows() -> list[GeoFlow]:
+    """Cross-border value flow, inferred from each wallet's majority
+    geo_country across its own transactions - see GeoFlow's docstring in
+    models.py for why that is the honest thing to compute, rather than a
+    literal src/dst pair the transaction schema does not carry."""
+    _require_graph()
+    return state.geo_flows

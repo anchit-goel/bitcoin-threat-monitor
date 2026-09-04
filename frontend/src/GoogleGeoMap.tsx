@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
-import type { GeoFlow } from './mock';
+import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
+import type { GeoFlow } from './api';
 
 interface GoogleGeoMapProps {
   flows: GeoFlow[];
@@ -89,24 +89,26 @@ export function GoogleGeoMap({ flows, hovered, setHovered }: GoogleGeoMapProps) 
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Initialize Google Maps API
+  // Initialize Google Maps API.
+  //
+  // The installed @googlemaps/js-api-loader (v2) replaced the old `new
+  // Loader(...).load()` class API with module-level setOptions() +
+  // importLibrary() - the class still exists but every method on it was
+  // removed, so the original `.load()` call would fail at runtime, not just
+  // at typecheck time.
   useEffect(() => {
     if (!apiKey) return;
 
-    const loader = new Loader({
-      apiKey,
-      version: 'weekly',
-      libraries: ['places', 'geometry']
-    });
+    setOptions({ key: apiKey, v: 'weekly' });
 
-    loader.load()
+    importLibrary('maps')
       .then(() => {
         setIsLoaded(true);
         setLoadError(null);
       })
-      .catch(err => {
-        console.error("Google Maps API failed to load:", err);
-        setLoadError("Failed to initialize Google Maps API with provided key.");
+      .catch((err: unknown) => {
+        console.error('Google Maps API failed to load:', err);
+        setLoadError('Failed to initialize Google Maps API with provided key.');
         setIsLoaded(false);
       });
   }, [apiKey]);
