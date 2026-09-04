@@ -2,7 +2,8 @@ name: Deploy demo to GitHub Pages
 
 # The published site is the frontend plus a frozen snapshot of the API, since
 # Pages serves static files and cannot run FastAPI. Regenerate the snapshot
-# with `npm run snapshot` against a running backend and commit the result;
+# with `backend/.venv/Scripts/python.exe backend/scripts/export_demo_snapshot.py`
+# against a running backend with a dataset ingested, and commit the result;
 # this workflow only builds and publishes what is already in the repo.
 
 on:
@@ -44,9 +45,9 @@ jobs:
       - name: Fail early if the demo snapshot is missing
         run: |
           if [ ! -f public/demo-data/alerts.json ]; then
-            echo "::error::public/demo-data is empty. Run 'npm run snapshot' against a"
-            echo "::error::running backend and commit the result, or the published site"
-            echo "::error::will load and then report the API unreachable."
+            echo "::error::public/demo-data is empty. Run backend/scripts/export_demo_snapshot.py"
+            echo "::error::against a running backend and commit the result, or the published"
+            echo "::error::site will load and then report the API unreachable."
             exit 1
           fi
 

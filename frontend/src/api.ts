@@ -92,14 +92,46 @@ export class ApiError extends Error {
   }
 }
 
+// GitHub Pages serves static files only - it cannot run FastAPI - so the
+// published demo reads a pre-fetched JSON snapshot instead of hitting a live
+// backend. Every request path used below has a matching static file,
+// generated for real from a running backend by
+// backend/scripts/export_demo_snapshot.py (see that script's docstring).
+// This mirrors exactly what the live endpoint would have returned - nothing
+// here is invented for the static build.
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true'
+
+function staticSnapshotFile(path: string): string {
+  const [route, query] = path.split('?')
+  if (route === '/alerts') return 'alerts.json'
+  if (route === '/entities') return 'entities.json'
+  if (route === '/entities/matrix') return 'entities-matrix.json'
+  if (route.startsWith('/entities/')) return `entities/${decodeURIComponent(route.slice('/entities/'.length))}.json`
+  if (route === '/geo-flows') return 'geo-flows.json'
+  if (route.startsWith('/wallet/') && route.endsWith('/dossier')) {
+    const addr = decodeURIComponent(route.slice('/wallet/'.length, -'/dossier'.length))
+    return `wallets/${addr}.json`
+  }
+  throw new ApiError(`No static snapshot mapping for ${path}${query ? `?${query}` : ''}`, 0)
+}
+
 async function request<T>(path: string): Promise<T> {
+  const url = STATIC_DEMO
+    ? `${import.meta.env.BASE_URL}demo-data/${staticSnapshotFile(path)}`
+    : `${BASE}${path}`
+
   let res: Response
   try {
-    res = await fetch(`${BASE}${path}`)
+    res = await fetch(url)
   } catch {
     // fetch only throws for a network-level failure, which here almost
     // always means the backend simply isn't running.
-    throw new ApiError(`Cannot reach the API at ${BASE}. Is the backend running?`, 0)
+    throw new ApiError(
+      STATIC_DEMO
+        ? `Demo snapshot file missing: ${url}`
+        : `Cannot reach the API at ${BASE}. Is the backend running?`,
+      0,
+    )
   }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`

@@ -11,7 +11,13 @@ export default defineConfig(({ mode }) => {
   const emitSourcemaps = mode === 'development'
 
   return {
-    base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
+    // FIGMA_PUBLIC_URL: Figma Make's own hosted preview. BASE_PATH: set by
+    // the GitHub Pages workflow to /<repo>/, since a project site (as
+    // opposed to a user/org site) is served from a subpath, not the origin
+    // root - every asset URL needs that prefix or they 404 on Pages.
+    base: process.env.FIGMA_PUBLIC_URL
+      ? `${process.env.FIGMA_PUBLIC_URL}/`
+      : process.env.BASE_PATH || '/',
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
