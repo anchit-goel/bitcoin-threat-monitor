@@ -31,6 +31,15 @@ export default defineConfig(({ mode }) => {
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
+      rollupOptions: {
+        // Two pages: a static landing page at the site root, and the React
+        // dashboard SPA at /app/. Vite mirrors each entry's own path under
+        // dist/, so app/index.html builds to dist/app/index.html.
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          app: path.resolve(__dirname, 'app/index.html'),
+        },
+      },
     },
     plugins: [
       react(),
