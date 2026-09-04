@@ -7,31 +7,8 @@ import {
   type Actor, type ActorDetail, type WalletDetail,
   type AlertItem, type GeoFlow, type TrailHop, type Severity,
 } from './api'
-import { GoogleGeoMap } from './GoogleGeoMap'
-
-
-// ─── Design tokens (JS mirrors of CSS vars) ───────────────────────────────
-const C = {
-  bg: '#0f1114', p1: '#171a1f', p2: '#1d2128', p3: '#252b34',
-  bd: '#262d38', bd2: '#323b47',
-  t0: '#dde7f2', t1: '#a8b8ca', t2: '#6a7f96', t3: '#3f5162',
-  rc: '#c9512a', rh: '#b87c22', rm: '#6e8faa', rl: '#3e7a60',
-  rcBg: 'rgba(201,81,42,0.10)', rhBg: 'rgba(184,124,34,0.10)',
-  rmBg: 'rgba(110,143,170,0.10)', rlBg: 'rgba(62,122,96,0.10)',
-  sans: "'Plus Jakarta Sans', system-ui, sans-serif",
-  mono: "'DM Mono','Menlo',monospace",
-}
-
-const SEV: Record<Severity, { color: string; bg: string; rank: number }> = {
-  CRITICAL: { color: C.rc, bg: C.rcBg, rank: 4 },
-  HIGH:     { color: C.rh, bg: C.rhBg, rank: 3 },
-  MEDIUM:   { color: C.rm, bg: C.rmBg, rank: 2 },
-  LOW:      { color: C.rl, bg: C.rlBg, rank: 1 },
-}
-
-function riskColor(score: number): string {
-  return score >= 80 ? C.rc : score >= 60 ? C.rh : score >= 40 ? C.rm : C.rl
-}
+import { NeonFlowMap } from './NeonFlowMap'
+import { C, SEV, riskColor, severityOf } from './theme'
 
 // ─── Navigation types ─────────────────────────────────────────────────────
 type TopTab = 'board' | 'heatmap' | 'geo'
@@ -813,11 +790,18 @@ function MoneyTrailView({
 }
 
 // ─── Heatmap view (actor × actor intensity) ───────────────────────────────
-function HeatmapView() {
+function HeatmapView({ onOpenWallet }: { onOpenWallet: (id: string) => void }) {
   const [actorIds, setActorIds] = useState<string[]>([])
   const [matrix, setMatrix] = useState<number[][]>([])
   const [hovered, setHovered] = useState<{ r: number; c: number } | null>(null)
+  const [selectedActorId, setSelectedActorId] = useState<string | null>(null)
+  const [actorDetail, setActorDetail] = useState<ActorDetail | null>(null)
   const CW = 64, CH = 30
+
+  useEffect(() => {
+    if (!selectedActorId) { setActorDetail(null); return }
+    api.getActorDetail(selectedActorId).then(setActorDetail)
+  }, [selectedActorId])
 
   useEffect(() => {
     // The matrix endpoint returns its own actor_ids array, aligned to the
@@ -844,14 +828,15 @@ function HeatmapView() {
   }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: '32px 36px', background: C.bg }}>
+    <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 36px', background: C.bg }}>
       <div style={{ marginBottom: '24px' }}>
         <Mono size={9} color={C.t2}>RELATIONSHIP HEATMAP</Mono>
         <div style={{ fontSize: '20px', fontWeight: 700, color: C.t0, marginTop: '4px', letterSpacing: '-0.01em' }}>
           Actor-to-actor transaction intensity
         </div>
         <div style={{ fontSize: '13px', color: C.t2, marginTop: '6px', maxWidth: '520px', lineHeight: 1.55 }}>
-          Cell shading indicates real BTC volume moved between wallets in each actor pair.
+          Cell shading indicates real BTC volume moved between wallets in each actor pair. Click a cell to open that actor.
         </div>
       </div>
 
@@ -888,7 +873,7 @@ function HeatmapView() {
                   <div
                     key={c}
                     onMouseEnter={() => !isDiag && val > 0 && setHovered({ r, c })}
-                    onMouseLeave={() => setHovered(null)}
+                    onClick={() => !isDiag && val > 0 && setSelectedActorId(rowId)}
                     style={{
                       width: `${CW}px`, height: `${CH}px`, flexShrink: 0,
                       background: isDiag ? C.p2 : isH ? `rgba(201,81,42,0.45)` : cellColor(val),
@@ -897,7 +882,7 @@ function HeatmapView() {
                       cursor: val > 0 && !isDiag ? 'pointer' : 'default',
                       transition: 'background 0.12s',
                     }}
-                    title={val > 0 && !isDiag ? `${rowId} ↔ ${actorIds[c]}: ${val.toFixed(3)} BTC` : undefined}
+                    title={val > 0 && !isDiag ? `${rowId} ↔ ${actorIds[c]}: ${val.toFixed(3)} BTC — click to open ${rowId}` : undefined}
                   >
                     {val > 0 && !isDiag && (
                       <span style={{ fontFamily: C.mono, fontSize: '9px', color: val > maxAmount * 0.5 ? 'rgba(255,255,255,0.8)' : C.t2, fontWeight: val > maxAmount * 0.5 ? 600 : 400 }}>
@@ -923,160 +908,301 @@ function HeatmapView() {
       )}
 
       {hovered && matrix[hovered.r]?.[hovered.c] > 0 && actorIds[hovered.r] && actorIds[hovered.c] && (
-        <div style={{ marginTop: '20px', padding: '14px 18px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', display: 'inline-block' }}>
-          <Mono size={9} color={C.t2}>PAIR DETAIL</Mono>
-          <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, margin: '6px 0 6px' }}>
-            {actorIds[hovered.r]} ↔ {actorIds[hovered.c]}
+        <div style={{ marginTop: '20px', padding: '14px 18px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', display: 'inline-flex', gap: '16px', alignItems: 'center' }}>
+          <div>
+            <Mono size={9} color={C.t2}>PAIR DETAIL</Mono>
+            <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, margin: '6px 0 6px' }}>
+              {actorIds[hovered.r]} ↔ {actorIds[hovered.c]}
+            </div>
+            <span style={{ fontFamily: C.mono, fontSize: '12px', color: C.t1 }}>
+              Volume: <span style={{ color: C.rc }}>{matrix[hovered.r][hovered.c].toFixed(4)} BTC</span>
+            </span>
           </div>
-          <span style={{ fontFamily: C.mono, fontSize: '12px', color: C.t1 }}>
-            Volume: <span style={{ color: C.rc }}>{matrix[hovered.r][hovered.c].toFixed(4)} BTC</span>
-          </span>
+          <button
+            onClick={() => setSelectedActorId(actorIds[hovered.r])}
+            style={{ background: C.p3, border: `1px solid ${C.bd2}`, borderRadius: '3px', color: C.t0, padding: '5px 12px', cursor: 'pointer', fontSize: '11px', fontFamily: C.sans }}
+          >
+            Open {actorIds[hovered.r]} →
+          </button>
+          <button
+            onClick={() => setSelectedActorId(actorIds[hovered.c])}
+            style={{ background: C.p3, border: `1px solid ${C.bd2}`, borderRadius: '3px', color: C.t0, padding: '5px 12px', cursor: 'pointer', fontSize: '11px', fontFamily: C.sans }}
+          >
+            Open {actorIds[hovered.c]} →
+          </button>
+          <button
+            onClick={() => setHovered(null)}
+            style={{ background: 'transparent', border: `1px solid ${C.bd2}`, borderRadius: '3px', color: C.t2, width: '22px', height: '22px', cursor: 'pointer', fontSize: '13px', lineHeight: 1 }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
       )}
+    </div>
+
+    {selectedActorId && (
+      <ActorDetailPanel
+        detail={actorDetail}
+        onClose={() => setSelectedActorId(null)}
+        onOpenWallet={onOpenWallet}
+      />
+    )}
     </div>
   )
 }
 
-// ─── Geographic Flow View — hand-built flat SVG world map ─────────────────
-// Equirectangular projection: x = (lon+180)/360*W, y = (90-lat)/180*H
-const MAP_W = 1000, MAP_H = 480
+// ─── Geographic Flow View — hand-built neon SVG world map, no API key ─────
+const GEO_POLL_MS = 8000
 
-function lonLat(lon: number, lat: number): [number, number] {
-  return [(lon + 180) / 360 * MAP_W, (90 - lat) / 180 * MAP_H]
+function GeoFlowDetailPanel({
+  flow, onClose, onOpenWallet,
+}: {
+  flow: GeoFlow
+  onClose: () => void
+  onOpenWallet: (walletId: string) => void
+}) {
+  const sevColor = riskColor(flow.risk_score)
+  return (
+    <div
+      className="slide-right"
+      style={{
+        width: '360px', flexShrink: 0, background: C.p1,
+        borderLeft: `1px solid ${C.bd}`,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}
+    >
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.bd}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ width: '3px', height: '36px', background: sevColor, borderRadius: '2px', flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <Mono size={9} color={C.t2}>CROSS-BORDER FLOW</Mono>
+          <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, marginTop: '3px' }}>
+            {flow.from_country} → {flow.to_country}
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.t2, fontSize: '16px', padding: '4px 6px', lineHeight: 1, cursor: 'pointer' }}>×</button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+          {[
+            { label: 'AMOUNT', value: `${flow.amount.toFixed(2)} BTC`, c: C.t0 },
+            { label: 'RISK SCORE', value: String(flow.risk_score), c: sevColor },
+          ].map(f => (
+            <div key={f.label} style={{ padding: '10px 12px', background: C.p2, border: `1px solid ${C.bd}`, borderRadius: '3px' }}>
+              <div style={{ fontFamily: C.mono, fontSize: '8.5px', color: C.t2, letterSpacing: '0.08em', marginBottom: '5px' }}>{f.label}</div>
+              <div style={{ fontFamily: C.mono, fontSize: '12px', fontWeight: 500, color: f.c }}>{f.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <SevBadge sev={severityOf(flow.risk_score)} />
+
+        <Divider />
+
+        <div>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: C.t2, letterSpacing: '0.08em', marginBottom: '10px' }}>
+            CONTRIBUTING WALLETS ({flow.sample_wallets.length})
+          </div>
+          <div style={{ fontSize: '11px', color: C.t2, marginBottom: '10px', lineHeight: 1.5 }}>
+            The real wallet-to-wallet transfers behind this corridor, largest first. Open one to see its full dossier.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {flow.sample_wallets.map((w, i) => (
+              <div key={i} style={{ padding: '8px 10px', background: C.p2, border: `1px solid ${C.bd}`, borderRadius: '3px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <Mono size={10} color={C.t2}>{w.amount_btc.toFixed(3)} BTC</Mono>
+                  <ScorePip score={w.risk_score} size={11} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <button
+                    onClick={() => onOpenWallet(w.from_wallet)}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', background: C.p3, border: `1px solid ${C.bd2}`, borderRadius: '3px', textAlign: 'left', width: '100%' }}
+                  >
+                    <Mono size={10} color={C.t0}>{w.from_wallet.slice(0, 16)}…</Mono>
+                    <span style={{ fontSize: '9px', color: C.t2, whiteSpace: 'nowrap' }}>from →</span>
+                  </button>
+                  <button
+                    onClick={() => onOpenWallet(w.to_wallet)}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', background: C.p3, border: `1px solid ${C.bd2}`, borderRadius: '3px', textAlign: 'left', width: '100%' }}
+                  >
+                    <Mono size={10} color={C.t0}>{w.to_wallet.slice(0, 16)}…</Mono>
+                    <span style={{ fontSize: '9px', color: C.t2, whiteSpace: 'nowrap' }}>to →</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
-// Simplified continent polygons (approximate, recognizable at overview scale)
-const CONTINENT_PATHS: string[] = [
-  // North America
-  mkPath([[-168,72],[-100,83],[-55,68],[-53,48],[-58,10],[-82,10],[-105,19],[-125,32],[-148,60]]),
-  // South America
-  mkPath([[-80,12],[-65,12],[-35,-5],[-35,-55],[-68,-55],[-80,-40]]),
-  // Europe (simplified)
-  mkPath([[-10,72],[30,72],[42,60],[45,40],[28,36],[10,36],[-5,40],[-10,50]]),
-  // Africa
-  mkPath([[-18,38],[52,38],[55,12],[50,-10],[40,-35],[15,-35],[15,-30],[-18,10]]),
-  // Asia
-  mkPath([[30,72],[180,72],[180,10],[130,10],[100,5],[65,10],[45,40],[30,72]]),
-  // Australia
-  mkPath([[114,-22],[154,-22],[155,-38],[138,-40],[125,-35],[114,-28]]),
-  // Greenland
-  mkPath([[-45,84],[-20,84],[-20,76],[-44,76]]),
-  // Japan (simplified)
-  mkPath([[130,32],[132,32],[132,45],[130,45]]),
-  // UK (simplified)
-  mkPath([[-6,50],[-6,58],[0,58],[0,50]]),
-]
+const GEO_PAGE_SIZE = 8
 
-function mkPath(pts: [number, number][]): string {
-  return pts.map(([lon, lat], i) => {
-    const [x, y] = lonLat(lon, lat)
-    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
-  }).join(' ') + ' Z'
-}
-
-// Country centroid coordinates [lon, lat]
-const COUNTRY_CENTERS: Record<string, [number, number]> = {
-  'USA': [-98, 38], 'Canada': [-96, 60], 'Mexico': [-102, 24],
-  'Brazil': [-51, -14], 'UK': [-3, 54], 'Germany': [10, 51],
-  'France': [2, 46], 'Switzerland': [8, 47], 'Netherlands': [5, 52],
-  'Russia': [100, 60], 'China': [105, 35], 'India': [78, 20],
-  'Japan': [138, 36], 'South Korea': [128, 37], 'Singapore': [104, 1],
-  'UAE': [54, 24], 'Nigeria': [8, 10], 'Australia': [133, -27],
-}
-
-function countryXY(name: string): [number, number] | null {
-  const c = COUNTRY_CENTERS[name]
-  if (!c) return null
-  return lonLat(c[0], c[1])
-}
-
-function arcPath(x1: number, y1: number, x2: number, y2: number): string {
-  const mx = (x1 + x2) / 2
-  const dist = Math.sqrt((x2-x1)**2 + (y2-y1)**2)
-  const cpy = Math.min(y1, y2) - dist * 0.22 - 10
-  return `M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${mx.toFixed(1)} ${cpy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`
-}
-
-function GeoFlowView() {
+function GeoFlowView({ onOpenWallet }: { onOpenWallet: (id: string) => void }) {
   const [flows, setFlows] = useState<GeoFlow[]>([])
   const [hovered, setHovered] = useState<GeoFlow | null>(null)
+  const [selected, setSelected] = useState<GeoFlow | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [page, setPage] = useState(0)
 
-  useEffect(() => { api.getGeoFlows().then(setFlows) }, [])
+  useEffect(() => {
+    let cancelled = false
+    const refresh = () => {
+      api.getGeoFlows().then(fresh => {
+        if (cancelled) return
+        setFlows(fresh)
+        setLastUpdated(new Date())
+      })
+    }
+    refresh()
+    const id = setInterval(refresh, GEO_POLL_MS)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
-  const maxAmount = flows.length ? Math.max(...flows.map(f => f.amount)) : 1
+  const sorted = [...flows].sort((a, b) => b.risk_score - a.risk_score)
+  const pageCount = Math.max(1, Math.ceil(sorted.length / GEO_PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageFlows = sorted.slice(safePage * GEO_PAGE_SIZE, safePage * GEO_PAGE_SIZE + GEO_PAGE_SIZE)
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: '32px 36px', background: C.bg }}>
-      <div style={{ marginBottom: '20px' }}>
-        <Mono size={9} color={C.t2}>GEOGRAPHIC FLOW</Mono>
-        <div style={{ fontSize: '20px', fontWeight: 700, color: C.t0, marginTop: '4px', letterSpacing: '-0.01em' }}>
-          Cross-border transaction flows
-        </div>
-        <div style={{ fontSize: '13px', color: C.t2, marginTop: '6px' }}>
-          Arc thickness encodes BTC volume · Arc color encodes risk score
-        </div>
-      </div>
-
-      {/* Realtime Google Maps API View */}
-      <div style={{ background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', padding: '8px' }}>
-        <GoogleGeoMap flows={flows} hovered={hovered} setHovered={setHovered} />
-      </div>
-
-
-      {/* Hover tooltip */}
-      {hovered && (
-        <div style={{ marginTop: '16px', padding: '14px 18px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', display: 'inline-flex', gap: '24px', alignItems: 'center' }}>
+    <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '32px 36px', background: C.bg }}>
+        <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <div>
-            <Mono size={9} color={C.t2}>FLOW</Mono>
-            <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, marginTop: '4px' }}>
-              {hovered.from_country} → {hovered.to_country}
+            <Mono size={9} color={C.t2}>GEOGRAPHIC FLOW</Mono>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: C.t0, marginTop: '4px', letterSpacing: '-0.01em' }}>
+              Cross-border transaction flows
+            </div>
+            <div style={{ fontSize: '13px', color: C.t2, marginTop: '6px' }}>
+              Line thickness encodes BTC volume · Line color encodes risk severity · map shows the page below · refreshes every {GEO_POLL_MS / 1000}s
             </div>
           </div>
-          <div>
-            <Mono size={9} color={C.t2}>AMOUNT</Mono>
-            <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, marginTop: '4px' }}>{hovered.amount.toFixed(2)} BTC</div>
-          </div>
-          <div>
-            <Mono size={9} color={C.t2}>RISK SCORE</Mono>
-            <div style={{ marginTop: '4px' }}><ScorePip score={hovered.risk_score} size={14} /></div>
-          </div>
-          <SevBadge sev={hovered.risk_score >= 80 ? 'CRITICAL' : hovered.risk_score >= 60 ? 'HIGH' : hovered.risk_score >= 40 ? 'MEDIUM' : 'LOW'} />
+          {lastUpdated && (
+            <Mono size={9} color={C.t3}>UPDATED {lastUpdated.toLocaleTimeString()}</Mono>
+          )}
         </div>
-      )}
 
-      {/* Flow table */}
-      <div style={{ marginTop: '24px' }}>
-        <Mono size={9} color={C.t2}>ALL FLOWS</Mono>
-        <div style={{ marginTop: '10px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['FROM', 'TO', 'AMOUNT (BTC)', 'RISK SCORE', ''].map(h => (
-                  <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontSize: '9.5px', fontFamily: C.mono, letterSpacing: '0.06em', color: C.t2, borderBottom: `1px solid ${C.bd}` }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {[...flows].sort((a, b) => b.risk_score - a.risk_score).map((f, i) => (
-                <tr
-                  key={i}
-                  onMouseEnter={() => setHovered(f)}
-                  onMouseLeave={() => setHovered(null)}
-                  style={{ background: hovered === f ? C.p2 : i % 2 === 1 ? C.p1 : 'transparent', cursor: 'default' }}
-                >
-                  <td style={{ padding: '9px 14px' }}><Mono size={12}>{f.from_country}</Mono></td>
-                  <td style={{ padding: '9px 14px' }}><Mono size={12}>{f.to_country}</Mono></td>
-                  <td style={{ padding: '9px 14px' }}><Mono size={12} color={C.t0}>{f.amount.toFixed(2)}</Mono></td>
-                  <td style={{ padding: '9px 14px' }}><ScorePip score={f.risk_score} size={12} /></td>
-                  <td style={{ padding: '9px 14px' }}><SevBadge sev={f.risk_score >= 80 ? 'CRITICAL' : f.risk_score >= 60 ? 'HIGH' : f.risk_score >= 40 ? 'MEDIUM' : 'LOW'} /></td>
+        <div style={{ background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', padding: '8px' }}>
+          <NeonFlowMap flows={pageFlows} hovered={hovered} setHovered={setHovered} onSelect={setSelected} />
+        </div>
+
+        {/* Detail card for the last-hovered flow. Stays put once shown instead
+            of vanishing on mouseout - only a new hover or the close button
+            changes it. Click a line or row for the full panel instead. */}
+        {hovered && (
+          <div style={{ marginTop: '16px', padding: '14px 18px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', display: 'inline-flex', gap: '24px', alignItems: 'center' }}>
+            <div>
+              <Mono size={9} color={C.t2}>FLOW</Mono>
+              <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, marginTop: '4px' }}>
+                {hovered.from_country} → {hovered.to_country}
+              </div>
+            </div>
+            <div>
+              <Mono size={9} color={C.t2}>AMOUNT</Mono>
+              <div style={{ fontFamily: C.mono, fontSize: '13px', color: C.t0, marginTop: '4px' }}>{hovered.amount.toFixed(2)} BTC</div>
+            </div>
+            <div>
+              <Mono size={9} color={C.t2}>RISK SCORE</Mono>
+              <div style={{ marginTop: '4px' }}><ScorePip score={hovered.risk_score} size={14} /></div>
+            </div>
+            <SevBadge sev={severityOf(hovered.risk_score)} />
+            <button
+              onClick={() => setSelected(hovered)}
+              style={{ background: C.p3, border: `1px solid ${C.bd2}`, borderRadius: '3px', color: C.t0, padding: '5px 12px', cursor: 'pointer', fontSize: '11px', fontFamily: C.sans }}
+            >
+              Open details →
+            </button>
+            <button
+              onClick={() => setHovered(null)}
+              style={{ background: 'transparent', border: `1px solid ${C.bd2}`, borderRadius: '3px', color: C.t2, width: '22px', height: '22px', cursor: 'pointer', fontSize: '13px', lineHeight: 1 }}
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Flow table — synced to the map: both show exactly this page's flows */}
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <Mono size={9} color={C.t2}>ALL FLOWS ({sorted.length})</Mono>
+            <Mono size={9} color={C.t3}>PAGE {safePage + 1} / {pageCount}</Mono>
+          </div>
+          <div style={{ marginTop: '10px', background: C.p1, border: `1px solid ${C.bd}`, borderRadius: '4px', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['FROM', 'TO', 'AMOUNT (BTC)', 'RISK SCORE', ''].map(h => (
+                    <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontSize: '9.5px', fontFamily: C.mono, letterSpacing: '0.06em', color: C.t2, borderBottom: `1px solid ${C.bd}` }}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pageFlows.map((f, i) => (
+                  <tr
+                    key={i}
+                    onMouseEnter={() => setHovered(f)}
+                    onClick={() => setSelected(f)}
+                    style={{ background: hovered === f ? C.p2 : i % 2 === 1 ? C.p1 : 'transparent', cursor: 'pointer' }}
+                  >
+                    <td style={{ padding: '9px 14px' }}><Mono size={12}>{f.from_country}</Mono></td>
+                    <td style={{ padding: '9px 14px' }}><Mono size={12}>{f.to_country}</Mono></td>
+                    <td style={{ padding: '9px 14px' }}><Mono size={12} color={C.t0}>{f.amount.toFixed(2)}</Mono></td>
+                    <td style={{ padding: '9px 14px' }}><ScorePip score={f.risk_score} size={12} /></td>
+                    <td style={{ padding: '9px 14px' }}><SevBadge sev={severityOf(f.risk_score)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination — changing pages changes which flows the map draws too */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '14px' }}>
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              style={{ background: C.p1, border: `1px solid ${C.bd2}`, borderRadius: '3px', color: safePage === 0 ? C.t3 : C.t1, padding: '6px 14px', fontSize: '12px', fontFamily: C.sans, cursor: safePage === 0 ? 'default' : 'pointer' }}
+            >
+              ← Prev
+            </button>
+            {Array.from({ length: pageCount }, (_, i) => i).map(i => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                style={{
+                  width: '26px', height: '26px', borderRadius: '3px', fontSize: '11px', fontFamily: C.mono,
+                  background: i === safePage ? C.rc : C.p1,
+                  color: i === safePage ? '#fff' : C.t2,
+                  border: `1px solid ${i === safePage ? C.rc : C.bd2}`,
+                  cursor: 'pointer',
+                }}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+              disabled={safePage >= pageCount - 1}
+              style={{ background: C.p1, border: `1px solid ${C.bd2}`, borderRadius: '3px', color: safePage >= pageCount - 1 ? C.t3 : C.t1, padding: '6px 14px', fontSize: '12px', fontFamily: C.sans, cursor: safePage >= pageCount - 1 ? 'default' : 'pointer' }}
+            >
+              Next →
+            </button>
+          </div>
         </div>
       </div>
+
+      {selected && (
+        <GeoFlowDetailPanel
+          flow={selected}
+          onClose={() => setSelected(null)}
+          onOpenWallet={onOpenWallet}
+        />
+      )}
     </div>
   )
 }
@@ -1137,8 +1263,8 @@ export default function App() {
       {/* Main view — relative for overlay anchoring */}
       <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {tab === 'board'   && <InvestigationBoard onOpenWallet={setOpenWalletId} />}
-        {tab === 'heatmap' && <HeatmapView />}
-        {tab === 'geo'     && <GeoFlowView />}
+        {tab === 'heatmap' && <HeatmapView onOpenWallet={setOpenWalletId} />}
+        {tab === 'geo'     && <GeoFlowView onOpenWallet={setOpenWalletId} />}
 
         {/* Wallet Dossier overlay */}
         {openWalletId && (

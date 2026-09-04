@@ -55,11 +55,19 @@ export interface AlertItem {
   flagged_at: string
 }
 
+export interface GeoFlowWallet {
+  from_wallet: string
+  to_wallet: string
+  amount_btc: number
+  risk_score: number
+}
+
 export interface GeoFlow {
   from_country: string
   to_country: string
   amount: number
   risk_score: number
+  sample_wallets: GeoFlowWallet[]
 }
 
 export interface TrailHop {

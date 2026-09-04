@@ -202,6 +202,20 @@ class WalletDossier(BaseModel):
     trail: list[TrailHop]
 
 
+class GeoFlowWallet(BaseModel):
+    """One real wallet-to-wallet transfer contributing to a GeoFlow's total.
+
+    Lets the frontend drill from an aggregated country-pair line down to the
+    actual wallets that moved value on it, and open their real dossiers -
+    the same wallets scored everywhere else in the app, not invented ones.
+    """
+
+    from_wallet: str
+    to_wallet: str
+    amount_btc: float
+    risk_score: int = Field(..., ge=0, le=100)
+
+
 class GeoFlow(BaseModel):
     """Aggregated value moved between two countries.
 
@@ -215,6 +229,7 @@ class GeoFlow(BaseModel):
     to_country: str
     amount: float
     risk_score: int = Field(..., ge=0, le=100)
+    sample_wallets: list[GeoFlowWallet] = Field(default_factory=list)
 
 
 class HealthStatus(BaseModel):

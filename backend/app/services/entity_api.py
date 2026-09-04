@@ -31,6 +31,7 @@ from app.models import (
     ConnectedWalletInfo,
     ContributingFeature,
     GeoFlow,
+    GeoFlowWallet,
     TrailHop,
     WalletDossier,
 )
@@ -404,10 +405,12 @@ def build_geo_flows(transactions: list, alerts_by_wallet: dict[str, dict], top_n
     inferred = {w: c.most_common(1)[0][0] for w, c in wallet_countries.items() if c}
 
     pair_amount: dict[tuple[str, str], float] = defaultdict(float)
-    pair_risk: dict[tuple[str, str], list[float]] = defaultdict(list)
+    # Real wallet-to-wallet transfers behind each country pair, kept so the
+    # frontend can drill from an aggregated line down to the actual wallets
+    # that moved value on it (not just the country-level total).
+    pair_transfers: dict[tuple[str, str], list[tuple[str, str, float, float]]] = defaultdict(list)
 
     for tx in transactions:
-        total_out = sum(tx.output_amounts) or 1.0
         for src in set(tx.input_addresses):
             c_src = inferred.get(src)
             if not c_src:
@@ -417,18 +420,41 @@ def build_geo_flows(transactions: list, alerts_by_wallet: dict[str, dict], top_n
                 if not c_dst or c_dst == c_src:
                     continue
                 pair_amount[(c_src, c_dst)] += amt
-                risk = alerts_by_wallet.get(src, {}).get("risk_score", 0.0)
-                risk = max(risk, alerts_by_wallet.get(dst, {}).get("risk_score", 0.0))
-                pair_risk[(c_src, c_dst)].append(risk)
+                risk = max(
+                    alerts_by_wallet.get(src, {}).get("risk_score", 0.0),
+                    alerts_by_wallet.get(dst, {}).get("risk_score", 0.0),
+                )
+                pair_transfers[(c_src, c_dst)].append((src, dst, amt, risk))
 
-    flows = [
-        GeoFlow(
+    flows = []
+    for (src, dst), amt in pair_amount.items():
+        transfers = pair_transfers[(src, dst)]
+        # Amount-weighted average risk: what fraction of the *value* moving
+        # through this corridor is tied to risky wallets. An unweighted mean
+        # buries a few risky wallets under bulk clean volume (the original
+        # bug); a plain max does the opposite and saturates almost every
+        # corridor to CRITICAL the moment one high-risk wallet touches it
+        # anywhere, however small the amount (measured: 34/40 corridors hit
+        # CRITICAL under a pure max, on this dataset). Weighting by the
+        # actual BTC moved gives the graded signal a money-flow map needs.
+        corridor_risk = sum(t[2] * t[3] for t in transfers) / amt
+        top_transfers = sorted(transfers, key=lambda t: t[2], reverse=True)[:5]
+        flows.append(GeoFlow(
             from_country=_COUNTRY_NAMES.get(src, src),
             to_country=_COUNTRY_NAMES.get(dst, dst),
             amount=round(amt, 4),
-            risk_score=round((sum(pair_risk[(src, dst)]) / len(pair_risk[(src, dst)])) * 100),
-        )
-        for (src, dst), amt in pair_amount.items()
-    ]
-    flows.sort(key=lambda f: f.amount, reverse=True)
+            risk_score=round(corridor_risk * 100),
+            sample_wallets=[
+                GeoFlowWallet(
+                    from_wallet=w_src, to_wallet=w_dst,
+                    amount_btc=round(w_amt, 4), risk_score=round(w_risk * 100),
+                )
+                for w_src, w_dst, w_amt, w_risk in top_transfers
+            ],
+        ))
+
+    # Risk first, amount as the tiebreaker - this is a threat map, so a
+    # corridor worth an analyst's attention should survive the top_n cut
+    # ahead of one that is merely large.
+    flows.sort(key=lambda f: (f.risk_score, f.amount), reverse=True)
     return flows[:top_n]
