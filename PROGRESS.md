@@ -1,18 +1,18 @@
 # Bitcoin Transaction Threat Monitor — Progress So Far
 
-**SIH 2026 internal hackathon.** Status as of 2026-09-04 (evening), after the
-CryptoTrace frontend merge and the neon geographic map. Team: this repo has
-one other contributor, **anchit-goel**, who pushed a full frontend rewrite
-directly to `main` (commit `e593ab0`) partway through this session — see
-section 5.
+**SIH 2026 internal hackathon.** Status as of 2026-09-05, after the
+CryptoTrace frontend merge, the real-geometry neon map, and a working
+GitHub Pages deploy. Team: this repo has one other contributor,
+**anchit-goel**, who pushed a full frontend rewrite directly to `main`
+(commit `e593ab0`) partway through this session — see section 4.
 
 Repo: https://github.com/Harit117/bitcoin-threat-monitor
-Live demo: https://harit117.github.io/bitcoin-threat-monitor/ (static
-snapshot of the *old* frontend — predates the CryptoTrace merge, see caveat
-in section 5)
+**Live demo: https://harit117.github.io/bitcoin-threat-monitor/ — verified
+working**, full click-through, zero console errors, entirely from a real
+static data snapshot (no backend needed to view it — see section 6).
 
-Latest commit: `7d76c16` — "Wire the CryptoTrace frontend to the real
-backend - real entities, real dossiers, real geo flows"
+Latest commit: `d77fd6e` — "Fix vite.config.ts crashing every build outside
+Figma Make"
 
 ---
 
@@ -188,77 +188,109 @@ marketplace"), invented money trails, invented geo flows. Fully replaced:
   `/entities` against `/entities/{id}` side by side, fixed by filtering both
   consistently.
 
-## 5. The map: replaced Google Maps entirely (today, most recent work)
+## 5. The map: real geometry, paginated, fully click-through
 
-The request: a live map showing transaction flow between locations, no API
-key, neon styling matching the dashboard theme, lines colored by
-criticality, plus a fix for a hover-tooltip that vanished on mouseout.
+**Google Maps is gone**, replaced twice over. First pass:
+`frontend/src/NeonFlowMap.tsx`, hand-drawn continent polygons with a neon
+glow treatment. Second pass, after "make it look proper, not like this":
+those hand-drawn shapes were replaced with **real Natural Earth geometry**
+(`world-atlas` + `d3-geo`'s `geoNaturalEarth1` projection, ~108KB of
+public-domain map data bundled into the app — zero API key, zero runtime
+network call, works fully offline). Real coastlines, real country borders.
 
-**Google Maps is gone.** `GoogleGeoMap.tsx` deleted. In its place,
-`frontend/src/NeonFlowMap.tsx` — a hand-built SVG world map (equirectangular
-projection, simplified continent outlines) with:
+- Arcs colored by the same CRITICAL/HIGH/MEDIUM/LOW tiers used everywhere
+  else in the app (`frontend/src/theme.ts`, pulled out as the one shared
+  source of truth so the map can't drift from the badges), saturated for
+  glow visibility. Animated flowing dashes plus a traveling "packet" dot per
+  arc (native SVG `animateMotion`, no JS animation loop).
+- **Real bug found and fixed in the risk computation, not just the visuals.**
+  The map only ever showed LOW/MEDIUM despite 119 high-risk wallets existing
+  in the data. Root cause, measured: a country-corridor's risk score
+  *averaged* every wallet-pair's risk across the whole corridor (diluting a
+  few CRITICAL wallets into a sea of ordinary transfers) and flows were
+  ranked by BTC amount alone (so small high-risk transfers never survived
+  the top-40 cut). Fixed by switching to a **BTC-volume-weighted average
+  risk per corridor** and sorting risk-first. A pure max was tried first and
+  rejected after measuring it saturated 34/40 corridors to CRITICAL; the
+  weighted average gives an honest spread — 8 CRITICAL / 1 HIGH / 3 MEDIUM /
+  28 LOW on this dataset.
+- **List and map are synced.** The flow list is paginated (8/page); the map
+  renders exactly the current page's flows, so the two can never show a
+  mismatched set. Verified: paging from page 1 (all CRITICAL) to page 3 (all
+  LOW) changes both the table and the map's line colors together.
+- **Click for a full detail panel**, not just hover. Clicking a line or a
+  row opens a slide-in panel (same visual language as the actor/wallet
+  cards) listing the real wallet-to-wallet transfers behind that corridor —
+  a new backend field, `GeoFlow.sample_wallets`, not a client-side
+  invention — each one openable into its real wallet dossier. Heatmap cells
+  are clickable too, opening the same `ActorDetailPanel` Investigation Board
+  uses. All three views share one wallet-dossier overlay now.
+- Hover tooltips no longer vanish on mouseout (they stick to the
+  last-hovered item until a new hover or an explicit `×`).
 
-- Glowing arcs between countries (SVG `feGaussianBlur` + `feMerge` filter),
-  colored by the same CRITICAL/HIGH/MEDIUM/LOW tiers used everywhere else in
-  the app, just in saturated neon hues (`#ff3b5c` / `#ffa634` / `#3ecbff` /
-  `#39ff8a`) instead of the muted dashboard palette
-- Animated flowing dashes (`stroke-dashoffset` CSS keyframe) plus a small
-  traveling "packet" dot per arc (native SVG `animateMotion`) — gives a
-  live, moving-transaction feel with zero JS animation loop
-- Pulsing country markers, sized by max risk score of flows touching that
-  country
-- A `LIVE` badge and a color legend baked into the map itself
-- **Real, not simulated, freshness:** `GeoFlowView` now polls
-  `GET /geo-flows` every 8 seconds and shows an "UPDATED {time}" stamp — if
-  the backend's data changes (re-ingest), the map picks it up without a page
-  reload. The moving-dash/packet animation is a visual effect layered on top
-  of real data, not fabricated motion.
-- **Hover-vanish bug fixed:** the flow table's rows and the map's tooltip
-  used to clear on `mouseleave`, so the detail card disappeared the instant
-  the cursor moved. Now the last-hovered flow's card stays visible until a
-  *different* row/arc is hovered or the new explicit `×` dismiss button is
-  clicked. Verified in-browser: moved the mouse fully off the table, card
-  stayed put; clicked `×`, card closed.
-
-Verified: `npx tsc --noEmit` clean, `npx vite build` clean
-(229KB bundle, down slightly from before since the Google Maps loader is no
-longer imported), zero browser console errors, screenshots confirm real
-glowing arcs rendering from real `/geo-flows` data.
-
-**Caveat for the live demo:** the GitHub Pages deployment
-(harit117.github.io) is a **static snapshot of the old frontend** — it
-predates both the CryptoTrace merge and the neon map. It has not been
-redeployed today. If the plan is to demo from that URL, it needs a fresh
-static build + redeploy first; right now the only place the new frontend +
-neon map can be seen is `npm run dev` locally.
+Verified: 98 backend tests pass, `tsc --noEmit` and `vite build` both clean,
+full click-through in a real browser with zero console errors.
 
 ---
 
-## 6. Known gaps / not yet done
+## 6. GitHub Pages: two real deploy-blocking bugs found and fixed
 
-1. **GitHub Pages redeploy** — live demo URL is stale (see caveat above).
-2. **Entity resolution does not feed the live wallet scorer** — by design,
+The Pages workflow (`.github/workflows/pages.yml`) predates the CryptoTrace
+rewrite and was pointed at infrastructure that no longer existed — the
+**last two deploy attempts had been silently failing** (confirmed via
+`gh run list`, not assumed). Two separate bugs, both fixed:
+
+1. **No static-data layer for the new frontend.** `api.ts` only ever talked
+   to a live backend; GitHub Pages can't run FastAPI. Added a
+   `VITE_STATIC_DEMO` mode that reads pre-fetched JSON instead, and
+   `backend/scripts/export_demo_snapshot.py`, which crawls a running backend
+   for **every** real response the frontend can reach — all 1,352 wallet
+   alerts, all 60 actor cards and details, the actor matrix, all 40
+   geo-flows, and (BFS outward through every connected wallet and
+   money-trail hop) **all 1,352 wallet dossiers** — so no link anywhere in
+   the UI 404s on the published demo. `vite.config.ts`'s `base` also only
+   read a Figma-specific env var, never the `BASE_PATH` the workflow
+   actually sets, which would have 404'd every asset under the
+   `/bitcoin-threat-monitor/` subpath.
+2. **`vite.config.ts` crashed on every build outside Figma Make.** A static
+   `import` of `.figma/make/site.json` — a file Figma Make's own hosted
+   environment generates automatically and which is correctly gitignored —
+   made the build fail outright anywhere that file doesn't exist, which is
+   everywhere except inside Figma Make itself. This is what was actually
+   breaking CI (confirmed from the failed run's own build log). Fixed to
+   load the file defensively (`existsSync` + fallback to `{}`) instead.
+
+Verified end to end before pushing: built with the exact env vars CI sets,
+served the output locally under a `/bitcoin-threat-monitor/` subpath with
+**no backend running at all**, clicked through every view including the
+map's click-to-wallet-dossier path. Then verified the actual deploy: watched
+the GitHub Actions run to green (`gh run watch`) and loaded the real public
+URL — real data, real map, zero console errors, zero failed requests.
+
+---
+
+## 7. Known gaps / not yet done
+
+1. **Entity resolution does not feed the live wallet scorer** — by design,
    kept as a separate signal, same as the two real-data benchmarks.
-3. **`rapid_fanout` pattern has 0% entity-resolution recall** — structural
+2. **`rapid_fanout` pattern has 0% entity-resolution recall** — structural
    limit (receive-only wallets are invisible to both fusion signals), stated
    in the commit, not silently left as a bug.
-4. **`.figma/make/site.json`** — a local-only placeholder file required for
-   `vite.config.ts` to build (the teammate's Figma Make scaffold references
-   an environment file Figma Make generates automatically but never
-   exports/commits). It is correctly gitignored, but **not documented
-   anywhere** as a required first-run step — a fresh clone (a teammate, or a
-   judge) will hit `Could not resolve './.figma/make/site.json'` on first
-   `npm run dev`/`vite build` with no explanation. Should get a line in
-   `frontend/README.md` or the root `README.md`.
-5. **Scalability Tier 2/3** (multi-dataset, distributed) — write-up exists,
+3. **Static demo drifts from the live backend over time.** The Pages
+   snapshot is frozen at whatever `export_demo_snapshot.py` captured — if
+   the model, entity resolution, or dataset changes, the public demo won't
+   reflect it until the script is re-run and committed. Not automated; a
+   manual step by design (the workflow comment says so).
+4. **Scalability Tier 2/3** (multi-dataset, distributed) — write-up exists,
    nothing built, not currently planned unless asked.
 
 ---
 
-## 7. Immediate next actions (pick one — nothing below is started)
+## 8. Immediate next actions (pick one — nothing below is started)
 
-1. Redeploy the static GitHub Pages build so the public demo link matches
-   what's actually been built (currently the single biggest gap between
-   "what we can show live" and "what a judge clicking the README link sees")
-2. Document the `.figma/make/site.json` local-setup step
+1. Re-run `export_demo_snapshot.py` and redeploy whenever the model or
+   dataset changes, so the public demo doesn't quietly drift stale again
+2. Document the `.figma/make/site.json` gotcha in `frontend/README.md` so a
+   fresh clone's first `npm run dev` isn't a mystery (the crash itself is
+   now fixed, but the file's purpose still isn't explained anywhere)
 3. Something else the user directs
